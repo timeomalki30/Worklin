@@ -1,0 +1,147 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600&display=swap');
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 213 68% 15%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 40 25% 92%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 40 18% 93%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 19 73% 52%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 40 18% 88%;
+    --input: 40 18% 88%;
+    --ring: 213 68% 15%;
+    --radius: 16px;
+    --font-inter: 'Inter', system-ui, sans-serif;
+    --font-manrope: 'Manrope', system-ui, sans-serif;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body {
+    @apply bg-cream-200 text-navy-800;
+    font-family: var(--font-inter);
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-manrope);
+    @apply font-bold text-navy-800;
+  }
+}
+
+@layer components {
+  /* ─── Card ─── */
+  .card {
+    @apply bg-white rounded-2xl border border-cream-300 shadow-sm;
+  }
+
+  /* ─── Sidebar ─── */
+  .sidebar {
+    @apply bg-navy-800 text-white flex flex-col;
+  }
+
+  /* ─── Nav item ─── */
+  .nav-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-white/65 transition-all duration-150 no-underline;
+  }
+  .nav-item:hover { @apply text-white bg-white/10; }
+  .nav-item.active { @apply text-white bg-white/15 font-semibold; }
+
+  /* ─── Badge ─── */
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold;
+  }
+  .badge-navy { @apply bg-navy-100 text-navy-800; }
+  .badge-terra { @apply bg-terra-50 text-terra-700; }
+  .badge-green { @apply bg-green-100 text-green-800; }
+  .badge-yellow { @apply bg-yellow-100 text-yellow-800; }
+  .badge-red { @apply bg-red-100 text-red-800; }
+  .badge-gray { @apply bg-gray-100 text-gray-700; }
+  .badge-blue { @apply bg-blue-100 text-blue-800; }
+
+  /* ─── KPI Card ─── */
+  .kpi-card {
+    @apply card p-6 flex flex-col gap-2;
+  }
+
+  /* ─── Table ─── */
+  .w-table { @apply w-full border-collapse; }
+  .w-table thead tr { @apply bg-cream-200 border-b border-cream-300; }
+  .w-table thead th { @apply px-4 py-3 text-left text-xs font-bold text-navy-400 uppercase tracking-wider; }
+  .w-table tbody tr { @apply border-b border-cream-300 hover:bg-cream-50 transition-colors; }
+  .w-table tbody td { @apply px-4 py-3.5 text-sm; }
+
+  /* ─── Form ─── */
+  .form-label { @apply block text-sm font-semibold text-navy-700 mb-1.5; }
+  .form-input {
+    @apply w-full px-3.5 py-2.5 bg-white border border-cream-300 rounded-xl text-sm text-navy-800
+           focus:outline-none focus:ring-2 focus:ring-navy-800/20 focus:border-navy-800
+           transition-all placeholder:text-navy-400/60;
+  }
+  .form-select {
+    @apply form-input appearance-none cursor-pointer;
+  }
+  .form-textarea {
+    @apply form-input resize-y min-h-[80px];
+  }
+
+  /* ─── Buttons ─── */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all duration-150 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary { @apply btn bg-navy-800 text-white hover:bg-navy-700 active:bg-navy-900; }
+  .btn-terra { @apply btn bg-terra-500 text-white hover:bg-terra-600 active:bg-terra-700; }
+  .btn-secondary { @apply btn bg-cream-300 text-navy-800 hover:bg-cream-400 border border-cream-400; }
+  .btn-ghost { @apply btn bg-transparent text-navy-700 hover:bg-cream-300 border border-cream-300; }
+  .btn-danger { @apply btn bg-red-600 text-white hover:bg-red-700; }
+  .btn-sm { @apply px-3 py-1.5 text-xs rounded-lg; }
+  .btn-lg { @apply px-6 py-3.5 text-base rounded-2xl; }
+  .btn-icon { @apply btn p-2.5 aspect-square; }
+
+  /* ─── Status pill ─── */
+  .status-pill {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold;
+  }
+
+  /* ─── Section title ─── */
+  .section-title {
+    @apply text-3xl font-bold text-navy-800;
+    font-family: var(--font-manrope);
+  }
+
+  /* ─── AI gradient ─── */
+  .ai-gradient {
+    @apply bg-gradient-to-br from-navy-800 via-navy-700 to-terra-600;
+  }
+  .ai-text {
+    @apply bg-gradient-to-r from-terra-400 to-terra-500 bg-clip-text text-transparent;
+  }
+
+  /* ─── Spinner ─── */
+  .spinner {
+    @apply inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { @apply bg-cream-400 rounded-full; }
+::-webkit-scrollbar-thumb:hover { @apply bg-navy-300; }
+
+/* Transitions globales */
+* { transition-property: color, background-color, border-color, opacity, box-shadow; transition-duration: 150ms; }
