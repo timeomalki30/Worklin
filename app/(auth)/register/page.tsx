@@ -24,20 +24,49 @@ function RegisterForm() {
     setLoading(true)
     const supabase = createClient()
 
-    const { data: authData, error: authErr } = await supabase.auth.signUp({ email: form.email, password: form.password })
+    // 1. Sign up
+    const { data: authData, error: authErr } = await supabase.auth.signUp({
+      email: form.email,
+      password: form.password,
+      options: { data: { role, prenom: form.prenom, nom: form.nom } },
+    })
     if (authErr) { setError(authErr.message); setLoading(false); return }
     const user = authData.user
     if (!user) { setLoading(false); return }
 
-    await supabase.from('profiles').upsert({ id: user.id, email: form.email, prenom: form.prenom, nom: form.nom, role })
-
-    if (role === 'artisan') {
-      const baseSlug = generateSlug(`${form.prenom}-${form.nom}`)
-      const slug = `${baseSlug}-${Math.floor(Math.random() * 9000) + 1000}`
-      await supabase.from('artisans').insert({ profile_id: user.id, slug, metier: form.metier || 'Artisan', ville: form.ville })
+    // 2. If email confirmation required, session won't exist yet — sign in explicitly
+    if (!authData.session) {
+      const { error: signInErr } = await supabase.auth.signInWithPassword({
+        email: form.email,
+        password: form.password,
+      })
+      if (signInErr) {
+        // Email confirmation required — show friendly message
+        setError('Inscription réussie ! Vérifiez votre email pour confirmer votre compte, puis connectez-vous.')
+        setLoading(false)
+        return
+      }
     }
 
-    router.push(role === 'artisan' ? '/dashboard/artisan' : '/dashboard/client')
+    // 3. Create / update profile with explicit role (lowercase, always 'artisan' or 'client')
+    const profileRole: 'artisan' | 'client' = role  // typed to prevent accidental casing
+    const { error: profileErr } = await supabase
+      .from('profiles')
+      .upsert({ id: user.id, email: form.email, prenom: form.prenom, nom: form.nom, role: profileRole })
+    if (profileErr) console.error('Profile upsert error:', profileErr)
+
+    // 4. Create artisan row
+    if (profileRole === 'artisan') {
+      const baseSlug = generateSlug(`${form.prenom}-${form.nom}`)
+      const slug = `${baseSlug}-${Math.floor(Math.random() * 9000) + 1000}`
+      const { error: artisanErr } = await supabase
+        .from('artisans')
+        .insert({ profile_id: user.id, slug, metier: form.metier || 'Artisan', ville: form.ville })
+      if (artisanErr) console.error('Artisan insert error:', artisanErr)
+    }
+
+    // 5. Redirect based on the role chosen in the form (not from DB — avoids race condition)
+    router.push(profileRole === 'artisan' ? '/dashboard/artisan' : '/dashboard/client')
   }
 
   return (

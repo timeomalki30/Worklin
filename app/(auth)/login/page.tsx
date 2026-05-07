@@ -25,9 +25,20 @@ function LoginForm() {
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
       const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-      const dest = profile?.role === 'artisan'
-        ? (redirectTo.includes('artisan') ? redirectTo : '/dashboard/artisan')
-        : '/dashboard/client'
+
+      // If role is explicitly 'artisan' → artisan dashboard
+      // If role is explicitly 'client' → client dashboard
+      // If profile missing (shouldn't happen) → check artisans table as fallback
+      let dest = '/dashboard/artisan' // safe default: artisan is primary user type
+      if (profile?.role === 'client') {
+        dest = '/dashboard/client'
+      } else if (profile?.role === 'artisan') {
+        dest = redirectTo.includes('artisan') ? redirectTo : '/dashboard/artisan'
+      } else {
+        // Fallback: check if an artisan row exists for this user
+        const { data: artisan } = await supabase.from('artisans').select('id').eq('profile_id', user.id).single()
+        dest = artisan ? '/dashboard/artisan' : '/dashboard/client'
+      }
       router.push(dest)
     }
   }

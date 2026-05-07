@@ -1,219 +1,144 @@
 'use client'
-import { useState } from 'react'
-import { Sparkles, Send, Copy, FileText, Mail, AlertTriangle, Wand2 } from 'lucide-react'
+import { Sparkles, Camera, MessageSquare, Mail, ShieldCheck, Lock, ArrowRight } from 'lucide-react'
+import Link from 'next/link'
 
-type Mode = 'devis' | 'email' | 'qualification' | 'tva'
-
-const MODES: { id: Mode; label: string; icon: any; desc: string; placeholder: string }[] = [
+const MODULES = [
   {
-    id: 'devis',
-    label: 'Générer un devis',
-    icon: FileText,
-    desc: 'Décrivez le chantier en quelques mots. L\'IA génère les lignes, quantités et prix.',
-    placeholder: 'Ex: Rénovation complète salle de bain 8m², dépose et repose baignoire, remplacement faïence, nouvelle robinetterie, forfait déplacement 20km...',
+    icon: Camera,
+    title: 'Devis depuis photo',
+    desc: 'Prenez une photo d\'un chantier ou d\'un plan. L\'IA génère automatiquement un devis détaillé avec lignes, quantités et prix.',
+    badge: 'IA Vision',
+    color: 'from-terra-500 to-terra-700',
   },
   {
-    id: 'email',
-    label: 'Rédiger un email pro',
+    icon: MessageSquare,
+    title: 'Réponse leads automatique',
+    desc: 'Dès qu\'un client soumet une demande via votre vitrine, l\'IA qualifie le lead et rédige une réponse personnalisée en votre nom.',
+    badge: 'IA Leads',
+    color: 'from-navy-600 to-navy-800',
+  },
+  {
     icon: Mail,
-    desc: 'Décrivez la situation. L\'IA rédige un email professionnel en votre nom.',
-    placeholder: 'Ex: Relancer un client qui ne répond pas depuis 2 semaines pour un devis de 3500€ de plomberie...',
+    title: 'Rédaction email pro',
+    desc: 'Relances clients, confirmations de RDV, suivis de chantier — l\'IA rédige des emails professionnels en 10 secondes.',
+    badge: 'IA Texte',
+    color: 'from-navy-700 to-navy-900',
   },
   {
-    id: 'qualification',
-    label: 'Qualifier un lead',
-    icon: Sparkles,
-    desc: 'Collez la demande client. L\'IA l\'analyse et vous donne une réponse qualifiée.',
-    placeholder: 'Ex: "Bonjour, j\'ai une fuite au niveau de mon lavabo depuis hier, ça coule sous le meuble, j\'habite au 3ème étage, est-ce que vous pouvez venir?"...',
-  },
-  {
-    id: 'tva',
-    label: 'Vérifier TVA / devis',
-    icon: AlertTriangle,
-    desc: 'Collez votre devis ou décrivez la prestation. L\'IA vérifie la TVA applicable.',
-    placeholder: 'Ex: Pose de fenêtres dans une maison principale construite en 2005, client particulier, montant HT 4200€...',
+    icon: ShieldCheck,
+    title: 'Vérification TVA & conformité',
+    desc: 'Décrivez la prestation, l\'IA vérifie le taux de TVA applicable (5,5 / 10 / 20%) et les mentions légales obligatoires 2027.',
+    badge: 'IA Légal',
+    color: 'from-navy-500 to-navy-700',
   },
 ]
 
 export default function IAPage() {
-  const [mode, setMode] = useState<Mode>('devis')
-  const [input, setInput] = useState('')
-  const [output, setOutput] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [history, setHistory] = useState<{ mode: Mode; input: string; output: string }[]>([])
-
-  const currentMode = MODES.find(m => m.id === mode)!
-
-  const handleGenerate = async () => {
-    if (!input.trim()) return
-    setLoading(true)
-    setOutput('')
-
-    const prompts: Record<Mode, string> = {
-      devis: `Tu es un assistant spécialisé pour les artisans français. Génère des lignes de devis détaillées à partir de cette description de chantier.
-
-Description: ${input}
-
-Réponds avec un tableau JSON de lignes au format:
-[{"description": "...", "quantite": X, "unite": "h|m²|forfait|u", "prix_unitaire": X, "tva_pct": X}]
-
-Utilise les taux de TVA français corrects (5.5% pour travaux rénovation énergie, 10% pour travaux amélioration résidence principale >2 ans, 20% pour neuf ou pro).
-Après le JSON, donne un résumé en 2-3 phrases des choix effectués.`,
-
-      email: `Tu es un assistant pour artisans français. Rédige un email professionnel, chaleureux mais direct, en français.
-
-Situation: ${input}
-
-L'email doit être:
-- Professionnel sans être froid
-- Court et efficace (max 10 lignes)
-- Avec formule de politesse adaptée
-- Signé "Cordialement, [Votre nom]"`,
-
-      qualification: `Tu es un assistant pour artisans français. Analyse cette demande client et fournis:
-1. Qualification du lead (urgent/normal/low priority)
-2. Estimation rapide de la complexité (simple/moyen/complexe)
-3. Questions à poser au client
-4. Suggestion de réponse rapide par SMS/email
-5. Estimation de prix indicative si possible
-
-Demande: ${input}`,
-
-      tva: `Tu es un expert comptable spécialisé dans le BTP français. Analyse la TVA applicable.
-
-Situation: ${input}
-
-Réponds avec:
-1. Taux de TVA applicable et pourquoi
-2. Conditions à vérifier (ancienneté du bien, type de client, etc.)
-3. Si plusieurs taux sont possibles, lequel privilégier et pourquoi
-4. Mentions obligatoires à inclure dans le devis
-5. ⚠️ Points de vigilance`,
-    }
-
-    try {
-      const response = await fetch('/api/ia', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: prompts[mode], mode }),
-      })
-      const data = await response.json()
-      const result = data.result || data.error || 'Erreur lors de la génération'
-      setOutput(result)
-      setHistory(prev => [{ mode, input: input.slice(0, 100), output: result }, ...prev.slice(0, 4)])
-    } catch {
-      setOutput('Erreur de connexion. Vérifiez votre clé API Anthropic.')
-    }
-    setLoading(false)
-  }
-
-  const copyOutput = () => {
-    navigator.clipboard.writeText(output)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-8 max-w-3xl">
+
+      {/* Header */}
       <div>
-        <h1 className="text-3xl font-black text-navy-800 flex items-center gap-3" style={{ fontFamily: 'var(--font-manrope)' }}>
-          <span className="w-10 h-10 bg-gradient-to-br from-terra-500 to-terra-600 rounded-2xl grid place-items-center text-white flex-shrink-0">
-            <Sparkles size={20} />
-          </span>
-          Assistant IA
-        </h1>
-        <p className="text-navy-400 mt-1">Propulsé par Claude AI · Adapté aux artisans français</p>
-      </div>
-
-      {/* Mode selector */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {MODES.map(m => {
-          const Icon = m.icon
-          const active = mode === m.id
-          return (
-            <button key={m.id} onClick={() => setMode(m.id)}
-              className={`p-4 rounded-2xl border-2 text-left transition-all ${active ? 'border-terra-500 bg-terra-50' : 'border-cream-300 bg-white hover:border-navy-300'}`}>
-              <Icon size={20} className={`mb-2 ${active ? 'text-terra-600' : 'text-navy-500'}`} />
-              <div className={`font-bold text-sm ${active ? 'text-terra-700' : 'text-navy-700'}`}>{m.label}</div>
-            </button>
-          )
-        })}
-      </div>
-
-      {/* Main input */}
-      <div className="card p-6">
-        <div className="flex items-center gap-2 mb-3">
-          <span className="text-sm font-semibold text-navy-600">{currentMode.desc}</span>
+        <div className="flex items-center gap-3 mb-2">
+          <div className="w-10 h-10 bg-gradient-to-br from-terra-500 to-terra-600 rounded-2xl grid place-items-center">
+            <Sparkles size={20} className="text-white" />
+          </div>
+          <h1 className="text-3xl font-black text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>
+            Assistant IA
+          </h1>
         </div>
-        <textarea
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          placeholder={currentMode.placeholder}
-          rows={5}
-          className="form-textarea w-full mb-4"
-        />
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-navy-400">{input.length} caractères</span>
-          <button onClick={handleGenerate} disabled={loading || !input.trim()} className="btn btn-terra">
-            {loading ? <span className="spinner" /> : <Wand2 size={16} />}
-            {loading ? 'Génération en cours…' : 'Générer avec l\'IA'}
-          </button>
-        </div>
+        <p className="text-navy-400">Propulsé par Claude AI · Adapté aux artisans français</p>
       </div>
 
-      {/* Output */}
-      {(output || loading) && (
-        <div className="card p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 bg-terra-500 rounded-md grid place-items-center">
-                <Sparkles size={13} className="text-white" />
+      {/* Coming soon banner */}
+      <div className="rounded-2xl overflow-hidden border border-terra-200"
+           style={{ background: 'linear-gradient(135deg, #0B2440 0%, #1A4A8A 100%)' }}>
+        <div className="p-8 relative overflow-hidden">
+          {/* Decorative orb */}
+          <div className="absolute top-0 right-0 w-64 h-64 rounded-full pointer-events-none"
+               style={{ background: 'radial-gradient(circle, rgba(221,90,42,0.2) 0%, transparent 65%)', filter: 'blur(40px)', transform: 'translate(30%, -30%)' }} />
+          <div className="relative z-10">
+            <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-4 py-1.5 mb-6">
+              <Lock size={13} className="text-terra-400" />
+              <span className="text-white/80 text-sm font-semibold">Module IA disponible après financement</span>
+            </div>
+            <h2 className="text-2xl font-black text-white mb-3" style={{ fontFamily: 'var(--font-manrope)' }}>
+              Bientôt disponible — Rejoignez la liste d&apos;attente
+            </h2>
+            <p className="text-white/60 mb-6 leading-relaxed max-w-lg">
+              Ces 4 modules IA sont en développement actif. Ils seront disponibles dans la prochaine version de Worklin,
+              financée par la communauté d&apos;artisans pionniers.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Link href="/" className="inline-flex items-center gap-2 bg-terra-500 hover:bg-terra-600 text-white px-5 py-2.5 rounded-xl font-semibold text-sm transition-colors no-underline">
+                <Sparkles size={15} />
+                Rejoindre les pionniers
+                <ArrowRight size={14} />
+              </Link>
+              <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 text-white/70 px-5 py-2.5 rounded-xl text-sm">
+                Notification à la sortie
               </div>
-              <span className="font-semibold text-navy-800 text-sm">Résultat</span>
             </div>
-            {output && (
-              <button onClick={copyOutput} className="btn btn-ghost btn-sm">
-                <Copy size={13} />
-                {copied ? 'Copié !' : 'Copier'}
-              </button>
-            )}
           </div>
-          {loading ? (
-            <div className="flex items-center gap-3 text-navy-400">
-              <span className="spinner" />
-              <span className="text-sm">Claude génère votre contenu…</span>
-            </div>
-          ) : (
-            <pre className="whitespace-pre-wrap text-sm text-navy-700 leading-relaxed font-sans bg-cream-50 rounded-xl p-4 max-h-[500px] overflow-y-auto">{output}</pre>
-          )}
-          {mode === 'devis' && output && output.includes('[') && (
-            <div className="mt-4 p-3 bg-terra-50 rounded-xl border border-terra-100">
-              <p className="text-xs text-terra-700 font-semibold">
-                💡 Copiez le JSON et collez-le dans &quot;Créer un devis&quot; (section import JSON) pour pré-remplir les lignes automatiquement.
-              </p>
-            </div>
-          )}
         </div>
-      )}
+      </div>
 
-      {/* History */}
-      {history.length > 0 && (
-        <div className="card p-6">
-          <h2 className="font-bold text-navy-800 mb-4 text-sm" style={{ fontFamily: 'var(--font-manrope)' }}>Historique de session</h2>
-          <div className="space-y-3">
-            {history.map((h, i) => (
-              <button key={i} onClick={() => { setMode(h.mode); setOutput(h.output) }}
-                className="w-full text-left p-3 rounded-xl border border-cream-300 hover:bg-cream-50 transition-colors">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-bold text-terra-600 uppercase">{MODES.find(m => m.id === h.mode)?.label}</span>
+      {/* 4 feature cards — disabled */}
+      <div>
+        <p className="text-sm font-semibold text-navy-400 uppercase tracking-wider mb-4">Ce qui vous attend</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {MODULES.map((mod) => {
+            const Icon = mod.icon
+            return (
+              <div key={mod.title}
+                   className="card p-6 flex flex-col gap-4 relative overflow-hidden opacity-80 select-none">
+                {/* Disabled overlay */}
+                <div className="absolute top-3 right-3 flex items-center gap-1.5 bg-cream-200 border border-cream-400 rounded-full px-2.5 py-1">
+                  <Lock size={10} className="text-navy-400" />
+                  <span className="text-[10px] font-bold text-navy-400 uppercase tracking-wide">Bientôt</span>
                 </div>
-                <p className="text-xs text-navy-500 truncate">{h.input}…</p>
-              </button>
-            ))}
-          </div>
+
+                {/* Icon */}
+                <div className={`w-11 h-11 rounded-2xl bg-gradient-to-br ${mod.color} grid place-items-center flex-shrink-0`}>
+                  <Icon size={20} className="text-white" />
+                </div>
+
+                {/* Content */}
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <h3 className="font-bold text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>{mod.title}</h3>
+                    <span className="text-[9px] font-black bg-terra-100 text-terra-600 px-1.5 py-0.5 rounded-md tracking-wide">
+                      {mod.badge}
+                    </span>
+                  </div>
+                  <p className="text-sm text-navy-500 leading-relaxed">{mod.desc}</p>
+                </div>
+              </div>
+            )
+          })}
         </div>
-      )}
+      </div>
+
+      {/* Roadmap timeline */}
+      <div className="card p-6">
+        <h3 className="font-bold text-navy-800 mb-4" style={{ fontFamily: 'var(--font-manrope)' }}>Roadmap</h3>
+        <div className="space-y-3">
+          {[
+            { phase: 'v1.0 — Actuel', items: 'Devis, Factures, CRM, Agenda, Vitrine, Finances', done: true },
+            { phase: 'v1.5 — Q3 2026', items: 'Assistant IA (4 modules), Devis depuis photo', done: false },
+            { phase: 'v2.0 — Q1 2027', items: 'Multi-artisan, API, Intégrations comptables', done: false },
+          ].map((row) => (
+            <div key={row.phase} className={`flex items-start gap-4 p-4 rounded-xl border ${row.done ? 'border-green-200 bg-green-50/50' : 'border-cream-300'}`}>
+              <div className={`w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0 ${row.done ? 'bg-green-500' : 'bg-cream-400'}`} />
+              <div>
+                <div className={`font-bold text-sm ${row.done ? 'text-green-800' : 'text-navy-700'}`}>{row.phase}</div>
+                <div className="text-xs text-navy-400 mt-0.5">{row.items}</div>
+              </div>
+              {row.done && <span className="ml-auto badge badge-green text-[10px]">Disponible</span>}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
