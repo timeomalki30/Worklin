@@ -86,6 +86,7 @@ begin
 end;
 $$;
 
+drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
@@ -116,9 +117,9 @@ create table artisans (
   created_at     timestamptz default now()
 );
 
-create index artisans_slug_idx   on artisans(slug);
-create index artisans_metier_idx on artisans(metier);
-create index artisans_ville_idx  on artisans(ville);
+create index if not exists artisans_slug_idx   on artisans(slug);
+create index if not exists artisans_metier_idx on artisans(metier);
+create index if not exists artisans_ville_idx  on artisans(ville);
 
 -- ============================================================
 -- CLIENTS (CRM artisan)
@@ -137,7 +138,7 @@ create table clients (
   created_at  timestamptz default now()
 );
 
-create index clients_artisan_idx on clients(artisan_id);
+create index if not exists clients_artisan_idx on clients(artisan_id);
 
 -- ============================================================
 -- DEVIS  (DEV-YYYY-NNNN — conformité 2027)
@@ -161,8 +162,8 @@ create table devis (
   created_at      timestamptz default now()
 );
 
-create index devis_artisan_idx on devis(artisan_id);
-create index devis_statut_idx  on devis(statut);
+create index if not exists devis_artisan_idx on devis(artisan_id);
+create index if not exists devis_statut_idx  on devis(statut);
 
 -- ============================================================
 -- FACTURES  (FAC-YYYY-NNNN — conformité 2027)
@@ -187,8 +188,8 @@ create table factures (
   created_at      timestamptz default now()
 );
 
-create index factures_artisan_idx on factures(artisan_id);
-create index factures_statut_idx  on factures(statut);
+create index if not exists factures_artisan_idx on factures(artisan_id);
+create index if not exists factures_statut_idx  on factures(statut);
 
 -- ============================================================
 -- CHANTIERS
@@ -208,7 +209,7 @@ create table chantiers (
   created_at  timestamptz default now()
 );
 
-create index chantiers_artisan_idx on chantiers(artisan_id);
+create index if not exists chantiers_artisan_idx on chantiers(artisan_id);
 
 -- ============================================================
 -- AGENDA
@@ -230,8 +231,8 @@ create table agenda (
   created_at  timestamptz default now()
 );
 
-create index agenda_artisan_date_idx on agenda(artisan_id, date);
-create index agenda_client_idx       on agenda(client_id);
+create index if not exists agenda_artisan_date_idx on agenda(artisan_id, date);
+create index if not exists agenda_client_idx       on agenda(client_id);
 
 -- ============================================================
 -- DEMANDES  (formulaire vitrine publique)
@@ -250,7 +251,7 @@ create table demandes (
   created_at  timestamptz default now()
 );
 
-create index demandes_artisan_idx on demandes(artisan_id, statut);
+create index if not exists demandes_artisan_idx on demandes(artisan_id, statut);
 
 -- ============================================================
 -- AVIS
@@ -265,7 +266,7 @@ create table avis (
   created_at  timestamptz default now()
 );
 
-create index avis_artisan_idx on avis(artisan_id);
+create index if not exists avis_artisan_idx on avis(artisan_id);
 
 -- Recalcule note_moyenne après chaque insert ou delete
 create or replace function public.update_artisan_note()
@@ -291,6 +292,7 @@ begin
 end;
 $$;
 
+drop trigger if exists on_avis_insert on avis;
 create trigger on_avis_insert
   after insert or delete on avis
   for each row execute function public.update_artisan_note();
