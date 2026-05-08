@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { formatCurrency, calcTotals, generateNumero, TVA_RATES } from '@/lib/utils'
 import { statusBadge } from '@/components/ui/badge'
 import type { Devis, Client, LigneDocument, DevisStatut } from '@/types'
-import { FileText, Plus, X, Trash2, Eye, Download, Sparkles, Send, Save } from 'lucide-react'
+import { FileText, Plus, X, Trash2, Eye, Download, Sparkles, Send, Save, Copy, Filter } from 'lucide-react'
 
 // Dynamic PDF imports (no SSR)
 const PDFViewer = dynamic(
@@ -55,6 +55,8 @@ export default function DevisPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [previewDevis, setPreviewDevis] = useState<Devis | null>(null)
   const [saving, setSaving] = useState(false)
+  const [filterStatut, setFilterStatut] = useState<DevisStatut | ''>('')
+  const [filterSearch, setFilterSearch] = useState('')
 
   // Create form
   const [form, setForm] = useState({
@@ -179,6 +181,45 @@ export default function DevisPage() {
     setDevis(prev => prev.map(d => d.id === id ? { ...d, statut } : d))
   }
 
+  // ─── Delete devis ───────────────────────────────────────────────────────────
+  const handleDelete = async (id: string) => {
+    if (!confirm('Supprimer ce devis ? Cette action est irréversible.')) return
+    const { error } = await supabase.from('devis').delete().eq('id', id)
+    if (!error) setDevis(prev => prev.filter(d => d.id !== id))
+  }
+
+  // ─── Duplicate devis ────────────────────────────────────────────────────────
+  const handleDuplicate = async (d: Devis) => {
+    if (!artisanId) return
+    const numero = generateNumero('DEV', devis.length + 1)
+    const { data, error } = await supabase.from('devis').insert({
+      artisan_id: artisanId,
+      client_id: d.client_id || null,
+      numero,
+      titre: d.titre ? `Copie — ${d.titre}` : null,
+      notes: d.notes || null,
+      statut: 'brouillon' as DevisStatut,
+      lignes: d.lignes,
+      total_ht: d.total_ht,
+      tva: d.tva,
+      total_ttc: d.total_ttc,
+      date_emission: new Date().toISOString().split('T')[0],
+      date_validite: null,
+    }).select('*, clients(nom, prenom, email)').single()
+    if (!error && data) setDevis(prev => [data, ...prev])
+  }
+
+  // ─── Filtered list ──────────────────────────────────────────────────────────
+  const filteredDevis = devis.filter(d => {
+    if (filterStatut && d.statut !== filterStatut) return false
+    if (filterSearch) {
+      const q = filterSearch.toLowerCase()
+      const clientName = d.clients ? `${d.clients.prenom || ''} ${d.clients.nom}`.toLowerCase() : ''
+      return d.numero.toLowerCase().includes(q) || (d.titre || '').toLowerCase().includes(q) || clientName.includes(q)
+    }
+    return true
+  })
+
   // ─── Render ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -238,6 +279,25 @@ export default function DevisPage() {
         </div>
       </div>
 
+      {/* ── Filters ── */}
+      {devis.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[200px] max-w-xs">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-navy-400 pointer-events-none" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <input type="text" placeholder="Rechercher…" value={filterSearch} onChange={e => setFilterSearch(e.target.value)} className="form-input pl-9 py-2 text-sm" />
+          </div>
+          <select value={filterStatut} onChange={e => setFilterStatut(e.target.value as DevisStatut | '')} className="form-select py-2 text-sm w-40">
+            <option value="">Tous les statuts</option>
+            {STATUTS.map(s => <option key={s} value={s}>{STATUT_LABELS[s]}</option>)}
+          </select>
+          {(filterStatut || filterSearch) && (
+            <button onClick={() => { setFilterStatut(''); setFilterSearch('') }} className="btn btn-ghost btn-sm">
+              <X size={13} /> Effacer
+            </button>
+          )}
+        </div>
+      )}
+
       {/* ── Table ── */}
       <div className="card overflow-hidden">
         {devis.length === 0 ? (
@@ -270,6 +330,9 @@ export default function DevisPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
+            {filteredDevis.length === 0 ? (
+              <div className="py-12 text-center text-navy-400 text-sm">Aucun devis ne correspond à vos filtres.</div>
+            ) : (
             <table className="w-table">
               <thead>
                 <tr>
@@ -283,7 +346,7 @@ export default function DevisPage() {
                 </tr>
               </thead>
               <tbody>
-                {devis.map(d => (
+                {filteredDevis.map(d => (
                   <tr key={d.id}>
                     <td className="font-bold text-navy-700 whitespace-nowrap">{d.numero}</td>
                     <td className="text-navy-600 max-w-[160px] truncate">{d.titre || '—'}</td>
@@ -308,19 +371,23 @@ export default function DevisPage() {
                       </select>
                     </td>
                     <td className="text-center">
-                      <button
-                        className="btn btn-ghost btn-sm gap-1.5"
-                        onClick={() => setPreviewDevis(d)}
-                        title="Aperçu PDF"
-                      >
-                        <Eye size={14} />
-                        <span className="hidden sm:inline">Aperçu PDF</span>
-                      </button>
+                      <div className="flex items-center justify-center gap-1">
+                        <button className="btn btn-ghost btn-sm p-2" onClick={() => setPreviewDevis(d)} title="Aperçu PDF">
+                          <Eye size={14} />
+                        </button>
+                        <button className="btn btn-ghost btn-sm p-2" onClick={() => handleDuplicate(d)} title="Dupliquer">
+                          <Copy size={14} />
+                        </button>
+                        <button className="btn btn-ghost btn-sm p-2 text-red-400 hover:text-red-600 hover:bg-red-50" onClick={() => handleDelete(d.id)} title="Supprimer">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            )}
           </div>
         )}
       </div>

@@ -14,6 +14,7 @@ export default function DashboardPage() {
   const [kpis, setKpis] = useState({ ca_mois: 0, devis_attente: 0, chantiers_actifs: 0, note: 0 })
   const [recentDevis, setRecentDevis] = useState<any[]>([])
   const [demandes, setDemandes] = useState<any[]>([])
+  const [upcomingRdv, setUpcomingRdv] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [conformite, setConformite] = useState({ ok: false, missing: [] as string[] })
 
@@ -35,11 +36,13 @@ export default function DashboardPage() {
       const now = new Date()
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
 
-      const [{ data: factures }, { data: devis }, { data: chantiers }, { data: demandesData }] = await Promise.all([
+      const today = new Date().toISOString().split('T')[0]
+      const [{ data: factures }, { data: devis }, { data: chantiers }, { data: demandesData }, { data: rdvData }] = await Promise.all([
         supabase.from('factures').select('total_ttc, statut').eq('artisan_id', a.id).gte('date_emission', startOfMonth).in('statut', ['envoyee', 'payee']),
         supabase.from('devis').select('*, clients(nom, prenom)').eq('artisan_id', a.id).order('created_at', { ascending: false }).limit(5),
         supabase.from('chantiers').select('id').eq('artisan_id', a.id).eq('statut', 'en_cours'),
         supabase.from('demandes').select('*').eq('artisan_id', a.id).eq('statut', 'nouveau').order('created_at', { ascending: false }).limit(5),
+        supabase.from('agenda').select('*, clients(nom, prenom)').eq('artisan_id', a.id).gte('date', today).neq('statut', 'annule').order('date').order('heure').limit(4),
       ])
 
       const ca = (factures || []).reduce((s: number, f: any) => s + (f.total_ttc || 0), 0)
@@ -53,6 +56,7 @@ export default function DashboardPage() {
       })
       setRecentDevis(devis || [])
       setDemandes(demandesData || [])
+      setUpcomingRdv(rdvData || [])
 
       // Conformité
       const missing = []
@@ -165,32 +169,63 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Nouvelles demandes */}
-        <div className="card overflow-hidden">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-cream-300">
-            <h2 className="font-bold text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>Nouvelles demandes</h2>
-            {demandes.length > 0 && <span className="badge badge-terra">{demandes.length}</span>}
-          </div>
-          {demandes.length === 0 ? (
-            <div className="p-6 text-center text-navy-400 text-sm">
-              <Clock size={28} className="mx-auto mb-3 opacity-30" />
-              <p>Aucune nouvelle demande</p>
-              <Link href="/dashboard/artisan/vitrine" className="text-terra-600 font-semibold text-xs mt-2 block no-underline">Activez votre vitrine →</Link>
+        {/* Side panels */}
+        <div className="flex flex-col gap-6">
+          {/* Nouvelles demandes */}
+          <div className="card overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-cream-300">
+              <h2 className="font-bold text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>Nouvelles demandes</h2>
+              {demandes.length > 0 && <span className="badge badge-terra">{demandes.length}</span>}
             </div>
-          ) : (
-            <div className="divide-y divide-cream-300">
-              {demandes.map(d => (
-                <div key={d.id} className="p-4">
-                  <div className="font-semibold text-sm text-navy-800">{d.nom}</div>
-                  <p className="text-xs text-navy-500 mt-1 line-clamp-2">{d.description}</p>
-                  <div className="flex gap-2 mt-3">
-                    <Link href={`/dashboard/artisan/devis?demande=${d.id}`} className="btn btn-sm btn-terra no-underline">Créer devis</Link>
-                    <span className="text-xs text-navy-400 self-center">{new Date(d.created_at).toLocaleDateString('fr-FR')}</span>
+            {demandes.length === 0 ? (
+              <div className="p-6 text-center text-navy-400 text-sm">
+                <Clock size={28} className="mx-auto mb-3 opacity-30" />
+                <p>Aucune nouvelle demande</p>
+                <Link href="/dashboard/artisan/vitrine" className="text-terra-600 font-semibold text-xs mt-2 block no-underline">Activez votre vitrine →</Link>
+              </div>
+            ) : (
+              <div className="divide-y divide-cream-300">
+                {demandes.map(d => (
+                  <div key={d.id} className="p-4">
+                    <div className="font-semibold text-sm text-navy-800">{d.nom}</div>
+                    <p className="text-xs text-navy-500 mt-1 line-clamp-2">{d.description}</p>
+                    <div className="flex gap-2 mt-3">
+                      <Link href={`/dashboard/artisan/devis?demande=${d.id}`} className="btn btn-sm btn-terra no-underline">Créer devis</Link>
+                      <span className="text-xs text-navy-400 self-center">{new Date(d.created_at).toLocaleDateString('fr-FR')}</span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Prochains RDV */}
+          <div className="card overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-cream-300">
+              <h2 className="font-bold text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>Prochains RDV</h2>
+              <Link href="/dashboard/artisan/agenda" className="text-xs text-terra-600 font-semibold no-underline hover:text-terra-700">Agenda →</Link>
             </div>
-          )}
+            {upcomingRdv.length === 0 ? (
+              <div className="p-6 text-center text-navy-400 text-sm">
+                <Clock size={28} className="mx-auto mb-3 opacity-30" />
+                <p>Aucun RDV à venir</p>
+                <Link href="/dashboard/artisan/agenda" className="text-terra-600 font-semibold text-xs mt-2 block no-underline">Planifier un RDV →</Link>
+              </div>
+            ) : (
+              <div className="divide-y divide-cream-300">
+                {upcomingRdv.map(ev => (
+                  <div key={ev.id} className="p-4">
+                    <div className="font-semibold text-sm text-navy-800">{ev.titre || 'RDV'}</div>
+                    <div className="text-xs text-navy-500 mt-1">
+                      {new Date(ev.date).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })} · {ev.heure}
+                      {ev.duree && ` · ${ev.duree}min`}
+                    </div>
+                    {ev.clients && <div className="text-xs text-navy-400 mt-0.5">{(ev.clients as any).prenom} {(ev.clients as any).nom}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

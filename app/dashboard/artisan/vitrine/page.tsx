@@ -202,27 +202,43 @@ export default function VitrinePage() {
           </div>
         ) : (
           <div className="divide-y divide-cream-300">
-            {demandes.map(d => (
+            {demandes.map(d => {
+              const statutBadge = d.statut === 'nouveau'
+                ? <span className="badge badge-terra text-xs">Nouveau</span>
+                : d.statut === 'contacte'
+                ? <span className="badge badge-blue text-xs">Contacté</span>
+                : d.statut === 'converti'
+                ? <span className="badge badge-green text-xs">Converti</span>
+                : <span className="badge badge-gray text-xs">Traité</span>
+              return (
               <div key={d.id} className="p-4 flex items-start justify-between gap-4">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">
                     <span className="font-semibold text-sm text-navy-800">{d.nom}</span>
-                    {d.statut === 'nouveau' && <span className="badge badge-terra text-xs">Nouveau</span>}
+                    {statutBadge}
                   </div>
                   {d.email && <div className="text-xs text-navy-400">{d.email}</div>}
                   {d.phone && <div className="text-xs text-navy-400">{d.phone}</div>}
                   <p className="text-sm text-navy-600 mt-2 line-clamp-2">{d.description}</p>
                   <div className="text-xs text-navy-400 mt-1">{new Date(d.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
                 </div>
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-2 flex-shrink-0">
                   <a href={`/dashboard/artisan/devis?prefill_nom=${encodeURIComponent(d.nom)}&prefill_desc=${encodeURIComponent(d.description)}`}
                     className="btn btn-terra btn-sm no-underline whitespace-nowrap">Créer devis</a>
-                  {d.statut !== 'traite' && (
-                    <button onClick={() => handleDemandeStatus(d.id, 'traite')} className="btn btn-ghost btn-sm">Marquer traité</button>
-                  )}
+                  <select
+                    value={d.statut || 'nouveau'}
+                    onChange={e => handleDemandeStatus(d.id, e.target.value)}
+                    className="form-select text-xs py-1 px-2"
+                  >
+                    <option value="nouveau">Nouveau</option>
+                    <option value="contacte">Contacté</option>
+                    <option value="converti">Converti</option>
+                    <option value="traite">Traité / Fermé</option>
+                  </select>
                 </div>
               </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>

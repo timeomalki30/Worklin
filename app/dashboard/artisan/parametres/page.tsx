@@ -23,6 +23,7 @@ export default function ParametresPage() {
   const [profileForm, setProfileForm] = useState({ prenom: '', nom: '', email: '', phone: '' })
   const [artisanForm, setArtisanForm] = useState({
     metier: '', entreprise: '', siret: '', tva: '', adresse: '', ville: '', description: '', tarif_horaire: '',
+    forme_juridique: '',
     certifications: {} as Record<string, any>,
   })
   const [conformite, setConformite] = useState({ score: 0, missing: [] as string[] })
@@ -46,6 +47,7 @@ export default function ParametresPage() {
         metier: a.metier || '', entreprise: a.entreprise || '', siret: a.siret || '',
         tva: a.tva || '', adresse: a.adresse || '', ville: a.ville || '',
         description: a.description || '', tarif_horaire: a.tarif_horaire?.toString() || '',
+        forme_juridique: a.forme_juridique || '',
         certifications: a.certifications || {},
       })
       const missing = []
@@ -71,6 +73,7 @@ export default function ParametresPage() {
         tva: artisanForm.tva, adresse: artisanForm.adresse, ville: artisanForm.ville,
         description: artisanForm.description,
         tarif_horaire: artisanForm.tarif_horaire ? parseFloat(artisanForm.tarif_horaire) : null,
+        forme_juridique: artisanForm.forme_juridique || null,
         certifications: artisanForm.certifications,
       }).eq('id', artisanId),
     ])
@@ -140,6 +143,27 @@ export default function ParametresPage() {
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
+            <label className="form-label">Forme juridique</label>
+            <select className="form-select" value={artisanForm.forme_juridique} onChange={e => sa('forme_juridique', e.target.value)}>
+              <option value="">— Sélectionner —</option>
+              <option value="auto">Auto-entrepreneur / Micro-entreprise</option>
+              <option value="EI">EI — Entreprise individuelle</option>
+              <option value="EIRL">EIRL</option>
+              <option value="EURL">EURL</option>
+              <option value="SARL">SARL</option>
+              <option value="SAS">SAS</option>
+              <option value="SASU">SASU</option>
+              <option value="SNC">SNC</option>
+              <option value="SA">SA</option>
+            </select>
+          </div>
+          <div>
+            <label className="form-label">Tarif horaire (€)</label>
+            <input type="number" className="form-input" value={artisanForm.tarif_horaire} onChange={e => sa('tarif_horaire', e.target.value)} placeholder="65" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
             <label className="form-label flex items-center gap-1">SIRET <Shield size={12} className="text-terra-500" /></label>
             <input className="form-input" value={artisanForm.siret} onChange={e => sa('siret', e.target.value)} placeholder="123 456 789 00012" />
           </div>
@@ -155,10 +179,6 @@ export default function ParametresPage() {
         <div>
           <label className="form-label">Description</label>
           <textarea className="form-textarea" rows={3} value={artisanForm.description} onChange={e => sa('description', e.target.value)} placeholder="Présentez vos services et votre expérience…" />
-        </div>
-        <div>
-          <label className="form-label">Tarif horaire (€)</label>
-          <input type="number" className="form-input max-w-[120px]" value={artisanForm.tarif_horaire} onChange={e => sa('tarif_horaire', e.target.value)} placeholder="65" />
         </div>
       </div>
 

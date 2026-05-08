@@ -4,7 +4,10 @@ import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { formatCurrency } from '@/lib/utils'
 import type { Client } from '@/types'
+
+type ClientStats = { ca: number; nb_devis: number; nb_chantiers: number }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type ClientForm = {
@@ -63,6 +66,7 @@ export default function ClientsPage() {
   const router = useRouter()
   const [artisanId, setArtisanId] = useState<string | null>(null)
   const [clients, setClients] = useState<Client[]>([])
+  const [clientStats, setClientStats] = useState<Record<string, ClientStats>>({})
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -91,14 +95,29 @@ export default function ClientsPage() {
       if (!artisan) { setLoading(false); return }
       setArtisanId(artisan.id)
 
-      const { data, error: err } = await supabase
-        .from('clients')
-        .select('*')
-        .eq('artisan_id', artisan.id)
-        .order('created_at', { ascending: false })
+      const [{ data, error: err }, { data: devisData }, { data: chantiersData }] = await Promise.all([
+        supabase.from('clients').select('*').eq('artisan_id', artisan.id).order('created_at', { ascending: false }),
+        supabase.from('devis').select('client_id, total_ttc, statut').eq('artisan_id', artisan.id),
+        supabase.from('chantiers').select('client_id').eq('artisan_id', artisan.id),
+      ])
 
       if (err) setError(err.message)
       else setClients(data || [])
+
+      // Build per-client stats
+      const stats: Record<string, ClientStats> = {}
+      ;(devisData || []).forEach((d: any) => {
+        if (!d.client_id) return
+        if (!stats[d.client_id]) stats[d.client_id] = { ca: 0, nb_devis: 0, nb_chantiers: 0 }
+        stats[d.client_id].nb_devis++
+        if (d.statut === 'accepte') stats[d.client_id].ca += d.total_ttc || 0
+      })
+      ;(chantiersData || []).forEach((c: any) => {
+        if (!c.client_id) return
+        if (!stats[c.client_id]) stats[c.client_id] = { ca: 0, nb_devis: 0, nb_chantiers: 0 }
+        stats[c.client_id].nb_chantiers++
+      })
+      setClientStats(stats)
       setLoading(false)
     }
     load()
@@ -269,6 +288,7 @@ export default function ClientsPage() {
             <ClientCard
               key={client.id}
               client={client}
+              stats={clientStats[client.id]}
               onEdit={() => openEdit(client)}
               onDelete={() => handleDelete(client)}
             />
@@ -296,10 +316,12 @@ export default function ClientsPage() {
 // ─── Client Card ──────────────────────────────────────────────────────────────
 function ClientCard({
   client,
+  stats,
   onEdit,
   onDelete,
 }: {
   client: Client
+  stats?: ClientStats
   onEdit: () => void
   onDelete: () => void
 }) {
@@ -347,6 +369,21 @@ function ClientCard({
           )}
         </div>
       </div>
+
+      {/* Stats bar */}
+      {stats && (stats.nb_devis > 0 || stats.nb_chantiers > 0) && (
+        <div className="px-5 py-2.5 bg-cream-50 border-t border-cream-300 flex items-center gap-4 text-xs text-navy-500">
+          {stats.ca > 0 && (
+            <span className="font-bold text-navy-700">{formatCurrency(stats.ca)} <span className="font-normal text-navy-400">CA devis</span></span>
+          )}
+          {stats.nb_devis > 0 && (
+            <span>{stats.nb_devis} devis</span>
+          )}
+          {stats.nb_chantiers > 0 && (
+            <span>{stats.nb_chantiers} chantier{stats.nb_chantiers > 1 ? 's' : ''}</span>
+          )}
+        </div>
+      )}
 
       {/* Footer */}
       <div className="px-5 py-3 border-t border-cream-300 flex items-center gap-2 flex-wrap">
