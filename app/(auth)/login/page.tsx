@@ -1,13 +1,10 @@
 'use client'
 import Link from 'next/link'
 import { useState } from 'react'
-import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { Suspense } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 
 function LoginForm() {
-  const params = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPwd, setShowPwd] = useState(false)
@@ -21,30 +18,17 @@ function LoginForm() {
     try {
       const supabase = createClient()
 
-      const { error: authErr, data } = await supabase.auth.signInWithPassword({ email, password })
+      const { error: authErr } = await supabase.auth.signInWithPassword({ email, password })
       if (authErr) {
         setError(authErr.message)
         setLoading(false)
         return
       }
 
-      // Fetch role to pick the right dashboard — default to artisan on any failure
-      let destination = '/dashboard/artisan'
-      try {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', data.user.id)
-          .single()
-        if (profile?.role === 'client') destination = '/dashboard/client'
-      } catch {
-        // fall through to default
-      }
-
-      const redirectTo = params.get('redirectTo')
-      // Hard redirect so middleware re-reads the session cookies on a fresh
-      // request — avoids the soft-navigation spinner that never unmounts.
-      window.location.href = redirectTo || destination
+      // Always go to artisan dashboard — hard redirect so cookies are
+      // fully committed before the next request. Never follow ?redirectTo
+      // which can be poisoned by stale server-side redirects.
+      window.location.href = '/dashboard/artisan'
     } catch (err: any) {
       setError(err?.message || 'Une erreur est survenue. Réessayez.')
       setLoading(false)
@@ -110,5 +94,5 @@ function LoginForm() {
 }
 
 export default function LoginPage() {
-  return <Suspense><LoginForm /></Suspense>
+  return <LoginForm />
 }
