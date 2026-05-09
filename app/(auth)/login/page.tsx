@@ -18,17 +18,28 @@ function LoginForm() {
     try {
       const supabase = createClient()
 
-      const { error: authErr } = await supabase.auth.signInWithPassword({ email, password })
+      const { error: authErr, data } = await supabase.auth.signInWithPassword({ email, password })
       if (authErr) {
         setError(authErr.message)
         setLoading(false)
         return
       }
 
-      // Always go to artisan dashboard — hard redirect so cookies are
-      // fully committed before the next request. Never follow ?redirectTo
-      // which can be poisoned by stale server-side redirects.
-      window.location.href = '/dashboard/artisan'
+      // Fetch role from server using service-role key (bypasses RLS)
+      let destination = '/dashboard/artisan'
+      try {
+        const token = data.session?.access_token
+        const res = await fetch('/api/get-role', {
+          headers: { authorization: `Bearer ${token}` },
+        })
+        const json = await res.json()
+        if (json.role === 'client') destination = '/dashboard/client'
+      } catch {
+        // fall through to default /dashboard/artisan
+      }
+
+      // Hard redirect — fully commits cookies before next request
+      window.location.href = destination
     } catch (err: any) {
       setError(err?.message || 'Une erreur est survenue. Réessayez.')
       setLoading(false)
