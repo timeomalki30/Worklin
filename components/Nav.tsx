@@ -39,11 +39,7 @@ export default function Nav({ variant = 'public' }: NavProps) {
         </nav>
 
         <div className="nav-actions">
-          {user ? (
-            <Link href="/dashboard/artisan" className="btn btn-ghost btn-sm">Mon espace</Link>
-          ) : (
-            <Link href="/devenir-artisan" className="btn btn-ghost btn-sm">Espace artisan</Link>
-          )}
+          <Link href="/login" className="btn btn-ghost btn-sm">Mon espace</Link>
           <Link href="/recherche" className="btn btn-primary btn-sm">
             Trouver un artisan
             <svg className="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
