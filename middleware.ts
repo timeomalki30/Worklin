@@ -1,12 +1,8 @@
+// BUILD: 2026-05-09 — cookie refresh only, zero redirects
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-/**
- * This middleware ONLY refreshes the Supabase session cookie so tokens
- * never expire mid-session. It never redirects — all auth checks are
- * handled client-side in each layout's useEffect.
- */
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request })
 
@@ -31,8 +27,7 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // Refresh session if expired — required for Server Components.
-  // IMPORTANT: do not add any redirect logic here.
+  // Refresh session cookie — NO redirects, ever.
   await supabase.auth.getUser()
 
   return response
