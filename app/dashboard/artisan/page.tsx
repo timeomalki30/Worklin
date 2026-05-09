@@ -22,6 +22,22 @@ export default function ArtisanDashboardPage() {
   const [artisanId, setArtisanId] = useState<string | null>(null)
   const [prenom, setPrenom] = useState('Artisan')
   const [online, setOnline] = useState(true)
+  const [welcomeBanner, setWelcomeBanner] = useState<string | null>(null)
+
+  // Welcome banner — reads ?welcome=true&prenom=… then cleans URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('welcome') === 'true') {
+      const nom = params.get('prenom') || ''
+      setWelcomeBanner(nom)
+      // Strip the params from the URL without triggering a navigation
+      const clean = window.location.pathname
+      window.history.replaceState({}, '', clean)
+      // Auto-dismiss after 5 s
+      const t = setTimeout(() => setWelcomeBanner(null), 5000)
+      return () => clearTimeout(t)
+    }
+  }, [])
 
   useEffect(() => {
     const load = async () => {
@@ -72,6 +88,27 @@ export default function ArtisanDashboardPage() {
 
   return (
     <div>
+      {/* Welcome banner */}
+      {welcomeBanner !== null && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          background: 'linear-gradient(135deg, var(--c-accent) 0%, #e07a2f 100%)',
+          color: 'white', borderRadius: 'var(--r-lg)', padding: '14px 20px', marginBottom: 24,
+          boxShadow: '0 4px 20px rgba(var(--c-accent-rgb, 184,101,43),0.35)',
+          animation: 'slideDown 0.3s ease',
+        }}>
+          <span style={{ fontSize: 'var(--fs-md)', fontWeight: 700, fontFamily: 'var(--font-head)' }}>
+            🎉 Bienvenue {welcomeBanner ? welcomeBanner : ''} sur Worklin !
+          </span>
+          <button
+            onClick={() => setWelcomeBanner(null)}
+            style={{ background: 'rgba(255,255,255,0.25)', border: 'none', borderRadius: 'var(--r-sm)', color: 'white', cursor: 'pointer', padding: '4px 10px', fontSize: 13, fontWeight: 700 }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28, flexWrap: 'wrap', gap: 16 }}>
         <div>

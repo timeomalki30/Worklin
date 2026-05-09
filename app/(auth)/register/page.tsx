@@ -76,7 +76,10 @@ export default function RegisterPage() {
         // Non-blocking — registration succeeds even if Brevo sync fails
       }
     }
-    router.push(role === 'artisan' ? '/dashboard/artisan' : '/dashboard/client')
+    const dest = role === 'artisan'
+      ? `/dashboard/artisan?welcome=true&prenom=${encodeURIComponent(fields.prenom)}`
+      : '/dashboard/client'
+    window.location.href = dest
   }
 
   return (

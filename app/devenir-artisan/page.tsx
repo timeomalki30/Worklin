@@ -134,9 +134,9 @@ export default function DevenirArtisanPage() {
                 </div>
                 <h3 style={{ fontSize: 'var(--fs-2xl)', fontWeight: 800, letterSpacing: '-0.02em', marginBottom: 12 }}>{success.prenom}, votre candidature est reçue !</h3>
                 <p style={{ color: 'var(--c-text-soft)', marginBottom: 16 }}>On vous rappelle sous 48 h au {success.phone}. On vérifie votre SIRET et vos certifs ensemble, et on vous met en ligne dans la foulée si tout est OK.</p>
-                <p style={{ fontSize: 13, color: 'var(--c-text-muted)', marginBottom: 20 }}>Pendant ce temps, explorez la <Link href="/dashboard/artisan" style={{ color: 'var(--c-accent)', fontWeight: 600 }}>démo de votre futur tableau de bord</Link>.</p>
+                <p style={{ fontSize: 13, color: 'var(--c-text-muted)', marginBottom: 20 }}>En attendant notre appel, créez votre compte pour accéder à votre tableau de bord en avant-première.</p>
                 <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-                  <Link href="/dashboard/artisan" className="btn btn-primary">Voir le tableau de bord</Link>
+                  <Link href="/register" className="btn btn-primary">Créer mon compte →</Link>
                   <Link href="/" className="btn btn-ghost">Retour à l&apos;accueil</Link>
                 </div>
               </div>
