@@ -34,34 +34,19 @@ export default function RegisterPage() {
     if (authErr) { setError(authErr.message); setLoading(false); return }
 
     if (data.user) {
-      // Upsert so any auto-created profile (from a DB trigger) gets the
-      // correct role instead of the trigger's default value.
-      await supabase.from('profiles').upsert({
-        id: data.user.id,
-        role,
-        prenom: fields.prenom,
-        nom: fields.nom,
-        phone: fields.phone,
-      }, { onConflict: 'id' })
-
-      if (role === 'artisan') {
-        // Build a URL-safe slug from prenom + nom
-        const slug = `${fields.prenom}-${fields.nom}`
-          .toLowerCase()
-          .normalize('NFD')
-          .replace(/[̀-ͯ]/g, '')  // strip accents
-          .replace(/[^a-z0-9-]/g, '-')      // non-alphanumeric → hyphen
-          .replace(/-+/g, '-')              // collapse repeated hyphens
-          .replace(/^-|-$/g, '')            // trim leading/trailing hyphens
-
-        await supabase.from('artisans').insert({
-          profile_id: data.user.id,
-          metier: '',
-          ville: '',
-          slug,
-          actif: false,
-        })
-      }
+      // Call server-side API with service-role key to bypass RLS and
+      // overwrite whatever role the handle_new_user trigger hardcoded.
+      await fetch('/api/complete-signup', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          userId: data.user.id,
+          role,
+          prenom: fields.prenom,
+          nom: fields.nom,
+          phone: fields.phone,
+        }),
+      })
 
       // Sync to Brevo contacts
       try {
