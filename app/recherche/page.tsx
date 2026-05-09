@@ -109,7 +109,7 @@ function RechercheContent() {
           <div style={{ marginBottom: 24, color: 'var(--c-text-soft)' }}>{artisans.length} artisan{artisans.length > 1 ? 's' : ''} trouvé{artisans.length > 1 ? 's' : ''}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {artisans.map(a => (
-              <Link key={a.id} href={`/artisan/${a.id}`} style={{ display: 'flex', alignItems: 'center', gap: 20, background: 'var(--c-surface)', border: '1px solid var(--c-border)', borderRadius: 'var(--r-lg)', padding: 20, transition: 'all var(--transition)', textDecoration: 'none', color: 'inherit' }}>
+              <Link key={a.id} href={a.slug ? `/${a.slug}` : `/artisan/${a.id}`} style={{ display: 'flex', alignItems: 'center', gap: 20, background: 'var(--c-surface)', border: '1px solid var(--c-border)', borderRadius: 'var(--r-lg)', padding: 20, transition: 'all var(--transition)', textDecoration: 'none', color: 'inherit' }}>
                 <div style={{ width: 64, height: 64, borderRadius: 'var(--r-md)', background: 'var(--c-accent)', display: 'grid', placeItems: 'center', fontSize: 24, fontWeight: 800, color: 'white', fontFamily: 'var(--font-head)', flexShrink: 0 }}>
                   {(a.profiles?.prenom?.[0] || a.metier[0]).toUpperCase()}
                 </div>

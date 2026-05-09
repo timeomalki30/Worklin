@@ -2,29 +2,43 @@
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import dynamic from 'next/dynamic'
-import type { Devis, ClientArtisan } from '@/types'
+import type { Devis, DevisStatut } from '@/types'
+import { Copy, CheckCircle, Send, X, Trash2 } from 'lucide-react'
 
 const PDFDownloadLink = dynamic(() => import('@react-pdf/renderer').then(m => ({ default: m.PDFDownloadLink })), { ssr: false })
 const PDFViewer = dynamic(() => import('@react-pdf/renderer').then(m => ({ default: m.PDFViewer })), { ssr: false })
 const PDFDocument = dynamic(() => import('@/components/PDFDocument'), { ssr: false })
 
+// ClientArtisan compat (devis page uses clients_artisan table)
+interface ClientArtisan {
+  id: string; prenom?: string; nom: string; email?: string; phone?: string
+  adresse?: string; notes?: string; artisan_id: string; created_at: string
+}
+
 const STATUS_LABELS: Record<string, string> = {
-  brouillon: 'Brouillon',
-  envoye: 'Envoyé',
-  accepte: 'Accepté',
-  refuse: 'Refusé',
-  expire: 'Expiré',
+  brouillon: 'Brouillon', envoye: 'Envoyé', accepte: 'Accepté',
+  refuse: 'Refusé', expire: 'Expiré', relance: 'Relancé',
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  brouillon: '#8A8675',
-  envoye: '#0B6FD4',
-  accepte: '#16A34A',
-  refuse: '#DC2626',
-  expire: '#CA8A04',
+  brouillon: '#8A8675', envoye: '#0B6FD4', accepte: '#16A34A',
+  refuse: '#DC2626', expire: '#CA8A04', relance: '#7C3AED',
 }
 
 const EMPTY_LIGNE = { description: '', quantite: 1, unite: '', prix_unitaire: 0, tva_pct: 20 }
+
+function buildRelanceTemplate(devis: Devis, client?: ClientArtisan): string {
+  const clientName = client ? `${client.prenom || ''} ${client.nom}`.trim() : 'Madame, Monsieur'
+  return `Bonjour ${clientName},
+
+Je me permets de revenir vers vous concernant le devis ${devis.numero} que je vous ai transmis le ${new Date(devis.date_emission).toLocaleDateString('fr-FR')}${devis.date_validite ? `, valable jusqu'au ${new Date(devis.date_validite).toLocaleDateString('fr-FR')}` : ''}.
+
+Ce devis porte sur : ${devis.titre || 'nos prestations'} pour un montant de ${devis.total_ttc.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}.
+
+N'hésitez pas à me contacter si vous avez des questions ou si vous souhaitez modifier certains éléments. Je reste disponible pour en discuter.
+
+Cordialement,`
+}
 
 export default function DevisPage() {
   const [devis, setDevis] = useState<Devis[]>([])
@@ -36,11 +50,13 @@ export default function DevisPage() {
   const [previewDevis, setPreviewDevis] = useState<Devis | null>(null)
   const [saving, setSaving] = useState(false)
 
+  // Relance modal
+  const [relanceDevis, setRelanceDevis] = useState<Devis | null>(null)
+  const [relanceText, setRelanceText] = useState('')
+  const [relanceCopied, setRelanceCopied] = useState(false)
+
   const [form, setForm] = useState({
-    client_id: '',
-    titre: '',
-    notes: '',
-    date_validite: '',
+    client_id: '', titre: '', notes: '', date_validite: '',
     lignes: [{ ...EMPTY_LIGNE }],
   })
 
@@ -57,14 +73,9 @@ export default function DevisPage() {
     if (artisan) {
       setArtisanId(artisan.id)
       setArtisanInfo({
-        nom: profile?.nom || '',
-        prenom: profile?.prenom || '',
-        entreprise: artisan.entreprise,
-        siret: artisan.siret,
-        tva: artisan.tva,
-        adresse: artisan.adresse,
-        email: profile?.email,
-        phone: profile?.phone,
+        nom: profile?.nom || '', prenom: profile?.prenom || '',
+        entreprise: artisan.entreprise, siret: artisan.siret, tva: artisan.tva,
+        adresse: artisan.adresse, email: profile?.email, phone: profile?.phone,
       })
 
       const [{ data: dList }, { data: cList }] = await Promise.all([
@@ -90,34 +101,23 @@ export default function DevisPage() {
     setSaving(true)
     const supabase = createClient()
     const { total_ht, tva, total_ttc } = calcTotals(form.lignes)
-
     const count = devis.length + 1
     const numero = `DEV-${new Date().getFullYear()}-${String(count).padStart(4, '0')}`
 
     const { data, error } = await supabase.from('devis').insert({
-      artisan_id: artisanId,
-      client_id: form.client_id || null,
-      numero,
-      titre: form.titre,
-      notes: form.notes,
+      artisan_id: artisanId, client_id: form.client_id || null,
+      numero, titre: form.titre, notes: form.notes,
       date_emission: new Date().toISOString().split('T')[0],
-      date_validite: form.date_validite || null,
-      statut,
-      lignes: form.lignes,
-      total_ht,
-      tva,
-      total_ttc,
+      date_validite: form.date_validite || null, statut, lignes: form.lignes,
+      total_ht, tva, total_ttc,
     }).select().single()
 
     if (!error && data) {
       if (statut === 'envoye' && form.client_id) {
         const client = clients.find(c => c.id === form.client_id)
         if (client?.email) {
-          await fetch('/api/send-email', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'devis', clientEmail: client.email, devisId: data.id }),
-          })
+          await fetch('/api/send-email', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'devis', clientEmail: client.email, devisId: data.id }) })
         }
       }
       setShowCreate(false)
@@ -130,7 +130,33 @@ export default function DevisPage() {
   const handleStatusChange = async (id: string, statut: string) => {
     const supabase = createClient()
     await supabase.from('devis').update({ statut }).eq('id', id)
-    setDevis(prev => prev.map(d => d.id === id ? { ...d, statut: statut as any } : d))
+    setDevis(prev => prev.map(d => d.id === id ? { ...d, statut: statut as DevisStatut } : d))
+  }
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Supprimer ce devis ? Cette action est irréversible.')) return
+    const supabase = createClient()
+    const { error } = await supabase.from('devis').delete().eq('id', id)
+    if (!error) setDevis(prev => prev.filter(d => d.id !== id))
+  }
+
+  const openRelance = (d: Devis) => {
+    const client = clients.find(c => c.id === d.client_id)
+    setRelanceDevis(d)
+    setRelanceText(buildRelanceTemplate(d, client))
+    setRelanceCopied(false)
+  }
+
+  const handleRelanceCopy = async () => {
+    await navigator.clipboard.writeText(relanceText)
+    setRelanceCopied(true)
+    setTimeout(() => setRelanceCopied(false), 2500)
+  }
+
+  const handleRelanceConfirm = async () => {
+    if (!relanceDevis) return
+    await handleStatusChange(relanceDevis.id, 'relance')
+    setRelanceDevis(null)
   }
 
   const updateLigne = (i: number, field: string, value: any) => {
@@ -147,7 +173,7 @@ export default function DevisPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 style={{ fontSize: 'var(--fs-3xl)', fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--c-text)', marginBottom: 4 }}>Devis</h1>
           <p style={{ color: 'var(--c-text-muted)', fontSize: 'var(--fs-sm)' }}>{devis.length} devis au total</p>
@@ -166,8 +192,8 @@ export default function DevisPage() {
           <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={() => setShowCreate(true)}>Créer mon premier devis</button>
         </div>
       ) : (
-        <div style={{ background: 'var(--c-surface)', borderRadius: 'var(--r-lg)', border: '1px solid var(--c-border)', overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <div style={{ background: 'var(--c-surface)', borderRadius: 'var(--r-lg)', border: '1px solid var(--c-border)', overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
             <thead>
               <tr style={{ background: 'var(--c-bg)', borderBottom: '1px solid var(--c-border)' }}>
                 {['Numéro', 'Titre', 'Client', 'Date', 'Montant TTC', 'Statut', 'Actions'].map(h => (
@@ -178,26 +204,35 @@ export default function DevisPage() {
             <tbody>
               {devis.map((d, i) => {
                 const client = clients.find(c => c.id === d.client_id)
+                const canRelance = d.statut === 'envoye' || d.statut === 'expire'
                 return (
                   <tr key={d.id} style={{ borderBottom: i < devis.length - 1 ? '1px solid var(--c-border)' : 'none' }}>
                     <td style={{ padding: '14px 16px', fontSize: 'var(--fs-sm)', fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--c-primary)' }}>{d.numero}</td>
                     <td style={{ padding: '14px 16px', fontSize: 'var(--fs-sm)' }}>{d.titre || '—'}</td>
-                    <td style={{ padding: '14px 16px', fontSize: 'var(--fs-sm)', color: 'var(--c-text-muted)' }}>{client ? `${client.prenom} ${client.nom}` : '—'}</td>
+                    <td style={{ padding: '14px 16px', fontSize: 'var(--fs-sm)', color: 'var(--c-text-muted)' }}>{client ? `${client.prenom || ''} ${client.nom}`.trim() : '—'}</td>
                     <td style={{ padding: '14px 16px', fontSize: 'var(--fs-sm)', color: 'var(--c-text-muted)' }}>{new Date(d.date_emission).toLocaleDateString('fr-FR')}</td>
                     <td style={{ padding: '14px 16px', fontSize: 'var(--fs-sm)', fontFamily: 'var(--font-head)', fontWeight: 700 }}>{d.total_ttc.toFixed(2)} €</td>
                     <td style={{ padding: '14px 16px' }}>
                       <select
                         value={d.statut}
                         onChange={e => handleStatusChange(d.id, e.target.value)}
-                        style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 'var(--r-sm)', border: 'none', background: `${STATUS_COLORS[d.statut]}22`, color: STATUS_COLORS[d.statut], cursor: 'pointer', fontFamily: 'var(--font-head)', outline: 'none' }}
+                        style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 'var(--r-sm)', border: 'none', background: `${STATUS_COLORS[d.statut] || '#8A8675'}22`, color: STATUS_COLORS[d.statut] || '#8A8675', cursor: 'pointer', fontFamily: 'var(--font-head)', outline: 'none' }}
                       >
                         {Object.entries(STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                       </select>
                     </td>
                     <td style={{ padding: '14px 16px' }}>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <button onClick={() => setPreviewDevis(d)} style={{ fontSize: 12, padding: '6px 12px', borderRadius: 'var(--r-sm)', border: '1px solid var(--c-border)', background: 'var(--c-surface)', cursor: 'pointer', fontFamily: 'var(--font-head)', fontWeight: 600 }}>
-                          Aperçu PDF
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <button onClick={() => setPreviewDevis(d)} title="Aperçu PDF" style={{ width: 32, height: 32, border: '1px solid var(--c-border)', borderRadius: 'var(--r-sm)', background: 'var(--c-surface)', cursor: 'pointer', display: 'grid', placeItems: 'center', color: 'var(--c-text-muted)' }}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                        {canRelance && (
+                          <button onClick={() => openRelance(d)} title="Relancer" style={{ width: 32, height: 32, border: '1px solid #ddd4fe', borderRadius: 'var(--r-sm)', background: '#f5f3ff', cursor: 'pointer', display: 'grid', placeItems: 'center', color: '#7C3AED' }}>
+                            <Send size={13} />
+                          </button>
+                        )}
+                        <button onClick={() => handleDelete(d.id)} title="Supprimer" style={{ width: 32, height: 32, border: '1px solid #fecaca', borderRadius: 'var(--r-sm)', background: '#fef2f2', cursor: 'pointer', display: 'grid', placeItems: 'center', color: '#DC2626' }}>
+                          <Trash2 size={13} />
                         </button>
                       </div>
                     </td>
@@ -206,6 +241,48 @@ export default function DevisPage() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Relance Modal */}
+      {relanceDevis && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ background: 'white', borderRadius: 'var(--r-xl)', width: '100%', maxWidth: 560 }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--c-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h2 style={{ fontSize: 'var(--fs-lg)', fontFamily: 'var(--font-head)', fontWeight: 800 }}>Relancer le devis</h2>
+                <p style={{ fontSize: 12, color: 'var(--c-text-muted)', marginTop: 2 }}>{relanceDevis.numero} — Copiez le texte et envoyez-le par email ou SMS</p>
+              </div>
+              <button onClick={() => setRelanceDevis(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--c-text-muted)', lineHeight: 0 }}>
+                <X size={20} />
+              </button>
+            </div>
+            <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--c-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Modèle d&apos;email de relance</label>
+                <textarea
+                  value={relanceText}
+                  onChange={e => setRelanceText(e.target.value)}
+                  rows={10}
+                  style={{ width: '100%', padding: '12px 14px', border: '1px solid var(--c-border)', borderRadius: 'var(--r-md)', fontSize: 13, lineHeight: 1.6, resize: 'vertical', fontFamily: 'inherit', outline: 'none', background: 'var(--c-bg)', color: 'var(--c-text)', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div style={{ background: '#f5f3ff', border: '1px solid #ddd4fe', borderRadius: 'var(--r-md)', padding: '10px 14px', fontSize: 12, color: '#7C3AED' }}>
+                💡 Personnalisez le texte si besoin, puis copiez-le pour l&apos;envoyer par email ou SMS à votre client.
+              </div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button onClick={() => setRelanceDevis(null)} className="btn btn-ghost">Annuler</button>
+                <button onClick={handleRelanceCopy} className="btn btn-ghost" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {relanceCopied ? <CheckCircle size={15} style={{ color: 'green' }} /> : <Copy size={15} />}
+                  {relanceCopied ? 'Copié !' : 'Copier le texte'}
+                </button>
+                <button onClick={handleRelanceConfirm} className="btn btn-primary" style={{ background: '#7C3AED', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Send size={14} />
+                  Marquer comme relancé
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -250,10 +327,7 @@ export default function DevisPage() {
                       <input value={ligne.unite} onChange={e => updateLigne(i, 'unite', e.target.value)} placeholder="h / m²" style={{ border: 'none', background: 'transparent', fontSize: 13, outline: 'none', padding: '4px 4px' }} />
                       <input type="number" value={ligne.prix_unitaire} onChange={e => updateLigne(i, 'prix_unitaire', parseFloat(e.target.value) || 0)} style={{ border: 'none', background: 'transparent', fontSize: 13, outline: 'none', padding: '4px 4px', width: '100%' }} />
                       <select value={ligne.tva_pct} onChange={e => updateLigne(i, 'tva_pct', parseFloat(e.target.value))} style={{ border: 'none', background: 'transparent', fontSize: 13, outline: 'none', padding: '4px 2px' }}>
-                        <option value={0}>0%</option>
-                        <option value={5.5}>5.5%</option>
-                        <option value={10}>10%</option>
-                        <option value={20}>20%</option>
+                        <option value={0}>0%</option><option value={5.5}>5.5%</option><option value={10}>10%</option><option value={20}>20%</option>
                       </select>
                       <button onClick={() => setForm(p => ({ ...p, lignes: p.lignes.filter((_, j) => j !== i) }))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--c-text-muted)', fontSize: 18, lineHeight: 1 }} disabled={form.lignes.length === 1}>×</button>
                     </div>
@@ -289,9 +363,9 @@ export default function DevisPage() {
 
               <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
                 <button className="btn btn-ghost" onClick={() => setShowCreate(false)}>Annuler</button>
-                <button className="btn btn-secondary" onClick={() => handleSave('brouillon')} disabled={saving}>Sauvegarder en brouillon</button>
+                <button className="btn btn-secondary" onClick={() => handleSave('brouillon')} disabled={saving}>Brouillon</button>
                 <button className="btn btn-primary" onClick={() => handleSave('envoye')} disabled={saving}>
-                  {saving ? <span className="waitlist-spinner"></span> : null}
+                  {saving ? <span className="waitlist-spinner" /> : null}
                   Envoyer au client
                 </button>
               </div>

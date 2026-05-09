@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { Star, MapPin, Phone, Mail, Shield, Send, ChevronRight } from 'lucide-react'
 import type { Metadata } from 'next'
 import VitrineContactForm from './VitrineContactForm'
+import AvisForm from './AvisForm'
 
 export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
   const supabase = createAdminClient()
@@ -173,9 +174,10 @@ export default async function VitrinePage({ params }: { params: { slug: string }
             )}
           </div>
 
-          {/* Right col — Contact form */}
-          <div id="contact" className="lg:sticky lg:top-20">
+          {/* Right col — Contact form + Avis form */}
+          <div id="contact" className="lg:sticky lg:top-20 space-y-6">
             <VitrineContactForm artisanId={artisan.id} artisanName={name} />
+            <AvisForm artisanId={artisan.id} />
           </div>
         </div>
       </div>

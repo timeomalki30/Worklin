@@ -55,7 +55,21 @@ export interface LigneDocument {
   tva_pct: number
 }
 
-export type DevisStatut = 'brouillon' | 'envoye' | 'accepte' | 'refuse' | 'expire'
+export type DevisStatut = 'brouillon' | 'envoye' | 'accepte' | 'refuse' | 'expire' | 'relance'
+
+export interface CertificationEntry {
+  active: boolean
+  expires_at?: string // ISO date string
+}
+
+export interface Notification {
+  id: string
+  type: 'demande' | 'devis_expire' | 'certif_expire'
+  message: string
+  href: string
+  read: boolean
+  created_at: string
+}
 export type FactureStatut = 'brouillon' | 'envoyee' | 'payee' | 'en_retard' | 'annulee'
 
 export interface Devis {

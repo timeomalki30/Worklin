@@ -489,6 +489,23 @@ function ChantierCard({
         <p className="text-xs text-navy-400 line-clamp-2 italic">{chantier.notes}</p>
       )}
 
+      {/* Photo grid */}
+      {photoCount > 0 && (
+        <div className="grid grid-cols-3 gap-1.5">
+          {(chantier.photos || []).slice(0, 6).map((url, i) => (
+            <a key={i} href={url} target="_blank" rel="noreferrer" className="relative aspect-square block overflow-hidden rounded-lg bg-cream-200">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={url} alt={`Photo ${i + 1}`} className="w-full h-full object-cover hover:scale-105 transition-transform" />
+              {i === 5 && photoCount > 6 && (
+                <div className="absolute inset-0 bg-navy-900/60 flex items-center justify-center text-white font-bold text-sm">
+                  +{photoCount - 6}
+                </div>
+              )}
+            </a>
+          ))}
+        </div>
+      )}
+
       {/* Status select */}
       <select
         className="form-select text-xs py-1"

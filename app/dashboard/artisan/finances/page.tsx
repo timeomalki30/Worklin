@@ -3,12 +3,22 @@ import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/utils'
 import { TrendingUp, TrendingDown, AlertCircle, CheckCircle, Send } from 'lucide-react'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 
 const MONTHS = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc']
 
+function CaTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null
+  return (
+    <div style={{ background: '#0B2440', color: 'white', padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700 }}>
+      <div>{label}</div>
+      <div style={{ color: '#E2835A' }}>{formatCurrency(payload[0].value)}</div>
+    </div>
+  )
+}
+
 export default function FinancesPage() {
   const [loading, setLoading] = useState(true)
-  const [artisanId, setArtisanId] = useState<string | null>(null)
   const [factures, setFactures] = useState<any[]>([])
   const [stats, setStats] = useState({ ca_annuel: 0, ca_mois: 0, en_attente: 0, en_retard: 0, tva_collectee: 0 })
   const [monthlyData, setMonthlyData] = useState<{ label: string; ca: number }[]>([])
@@ -20,7 +30,6 @@ export default function FinancesPage() {
     if (!user) return
     const { data: a } = await supabase.from('artisans').select('id').eq('profile_id', user.id).single()
     if (!a) return
-    setArtisanId(a.id)
 
     const year = new Date().getFullYear()
     const { data: fList } = await supabase
@@ -35,17 +44,14 @@ export default function FinancesPage() {
 
     const now = new Date()
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
-
     const ca_annuel = all.filter(f => f.statut === 'payee').reduce((s: number, f: any) => s + f.total_ttc, 0)
     const ca_mois = all.filter(f => f.statut === 'payee' && f.date_emission >= startOfMonth).reduce((s: number, f: any) => s + f.total_ttc, 0)
     const en_attente = all.filter(f => f.statut === 'envoyee').reduce((s: number, f: any) => s + f.total_ttc, 0)
     const today = new Date().toISOString().split('T')[0]
     const en_retard = all.filter(f => f.statut === 'envoyee' && f.date_echeance && f.date_echeance < today).reduce((s: number, f: any) => s + f.total_ttc, 0)
     const tva_collectee = all.filter(f => f.statut === 'payee').reduce((s: number, f: any) => s + f.tva, 0)
-
     setStats({ ca_annuel, ca_mois, en_attente, en_retard, tva_collectee })
 
-    // Monthly chart data
     const monthly = MONTHS.map((label, i) => {
       const m = String(i + 1).padStart(2, '0')
       const ca = all.filter(f => f.statut === 'payee' && f.date_emission.startsWith(`${year}-${m}`)).reduce((s: number, f: any) => s + f.total_ttc, 0)
@@ -60,17 +66,17 @@ export default function FinancesPage() {
   const handleRelance = async (factureId: string, clientEmail: string, facture: any) => {
     setSendingRelance(factureId)
     await fetch('/api/send-email', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'relance', clientEmail, factureId, facture }),
     })
     setSendingRelance(null)
   }
 
-  const maxCa = Math.max(...monthlyData.map(d => d.ca), 1)
   const today = new Date().toISOString().split('T')[0]
   const unpaid = factures.filter(f => f.statut === 'envoyee')
   const late = factures.filter(f => f.statut === 'envoyee' && f.date_echeance && f.date_echeance < today)
+  const currentMonth = new Date().getMonth()
+
   const tva_q = [0, 1, 2, 3].map(q => {
     const start = `${new Date().getFullYear()}-${String(q * 3 + 1).padStart(2, '0')}-01`
     const end = `${new Date().getFullYear()}-${String((q + 1) * 3).padStart(2, '0')}-31`
@@ -104,30 +110,35 @@ export default function FinancesPage() {
         ))}
       </div>
 
-      {/* Chart */}
+      {/* Recharts BarChart */}
       <div className="card p-6">
-        <h2 className="font-bold text-navy-800 mb-6" style={{ fontFamily: 'var(--font-manrope)' }}>CA mensuel {new Date().getFullYear()}</h2>
-        <div className="flex items-end gap-2 h-40">
-          {monthlyData.map((d, i) => {
-            const height = maxCa > 0 ? Math.max((d.ca / maxCa) * 100, d.ca > 0 ? 8 : 2) : 2
-            const isCurrentMonth = i === new Date().getMonth()
-            return (
-              <div key={i} className="flex-1 flex flex-col items-center gap-1.5">
-                <div className="relative group flex-1 flex items-end w-full">
-                  {d.ca > 0 && (
-                    <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-navy-800 text-white text-[10px] px-1.5 py-0.5 rounded hidden group-hover:block whitespace-nowrap">
-                      {formatCurrency(d.ca)}
-                    </div>
-                  )}
-                  <div
-                    className={`w-full rounded-t-lg transition-all ${isCurrentMonth ? 'bg-terra-500' : d.ca > 0 ? 'bg-navy-300' : 'bg-cream-300'}`}
-                    style={{ height: `${height}%` }}
-                  />
-                </div>
-                <span className={`text-[10px] font-medium ${isCurrentMonth ? 'text-terra-600 font-bold' : 'text-navy-400'}`}>{d.label}</span>
-              </div>
-            )
-          })}
+        <h2 className="font-bold text-navy-800 mb-6" style={{ fontFamily: 'var(--font-manrope)' }}>
+          CA mensuel {new Date().getFullYear()}
+        </h2>
+        <ResponsiveContainer width="100%" height={200}>
+          <BarChart data={monthlyData} barCategoryGap="30%">
+            <XAxis
+              dataKey="label"
+              tick={{ fontSize: 11, fill: '#8B8074', fontWeight: 600 }}
+              axisLine={false}
+              tickLine={false}
+            />
+            <YAxis hide />
+            <Tooltip content={<CaTooltip />} cursor={{ fill: 'rgba(11,36,64,0.05)', radius: 4 }} />
+            <Bar dataKey="ca" radius={[6, 6, 0, 0]} maxBarSize={48}>
+              {monthlyData.map((_, i) => (
+                <Cell
+                  key={i}
+                  fill={i === currentMonth ? '#E2835A' : '#0B2440'}
+                  opacity={i === currentMonth ? 1 : 0.25}
+                />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+        <div className="flex items-center gap-4 mt-3 justify-end text-xs text-navy-400">
+          <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-sm bg-terra-500" /> Mois en cours</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-sm bg-navy-800 opacity-25" /> Autres mois</span>
         </div>
       </div>
 
@@ -178,10 +189,7 @@ export default function FinancesPage() {
                       </div>
                     </div>
                     {client?.email && (
-                      <button
-                        onClick={() => handleRelance(f.id, client.email, f)}
-                        disabled={sendingRelance === f.id}
-                        className="btn btn-sm btn-ghost flex-shrink-0">
+                      <button onClick={() => handleRelance(f.id, client.email, f)} disabled={sendingRelance === f.id} className="btn btn-sm btn-ghost flex-shrink-0">
                         {sendingRelance === f.id ? <span className="spinner" /> : <Send size={13} />}
                         Relancer
                       </button>
