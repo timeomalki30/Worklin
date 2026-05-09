@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { Eye, EyeOff } from 'lucide-react'
 
 export default function RegisterPage() {
   const router = useRouter()
@@ -10,6 +11,7 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [fields, setFields] = useState({ email: '', password: '', prenom: '', nom: '', phone: '' })
+  const [showPwd, setShowPwd] = useState(false)
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setFields(p => ({ ...p, [k]: e.target.value }))
 
@@ -121,7 +123,29 @@ export default function RegisterPage() {
             <input type="tel" value={fields.phone} onChange={set('phone')} placeholder="06 12 34 56 78" required={role === 'artisan'} />
           </div>
           <div className="form-group"><label>Email *</label><input type="email" value={fields.email} onChange={set('email')} required autoComplete="email" /></div>
-          <div className="form-group"><label>Mot de passe *</label><input type="password" value={fields.password} onChange={set('password')} required autoComplete="new-password" minLength={8} /></div>
+          <div className="form-group">
+            <label>Mot de passe *</label>
+            <div style={{ position: 'relative' }}>
+              <input
+                type={showPwd ? 'text' : 'password'}
+                value={fields.password}
+                onChange={set('password')}
+                required
+                autoComplete="new-password"
+                minLength={8}
+                style={{ paddingRight: 44 }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPwd(v => !v)}
+                tabIndex={-1}
+                style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--c-text-muted)', display: 'flex', padding: 0, lineHeight: 0 }}
+                aria-label={showPwd ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+              >
+                {showPwd ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+          </div>
 
           <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: 8 }} disabled={loading}>
             {loading ? <span className="waitlist-spinner"></span> : null}

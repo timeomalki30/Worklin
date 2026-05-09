@@ -4,12 +4,14 @@ import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Suspense } from 'react'
+import { Eye, EyeOff } from 'lucide-react'
 
 function LoginForm() {
   const router = useRouter()
   const params = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPwd, setShowPwd] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -17,14 +19,35 @@ function LoginForm() {
     e.preventDefault()
     setError('')
     setLoading(true)
-    const supabase = createClient()
-    const { error: authErr, data } = await supabase.auth.signInWithPassword({ email, password })
-    if (authErr) { setError(authErr.message); setLoading(false); return }
+    try {
+      const supabase = createClient()
 
-    const { data: profile } = await supabase.from('profiles').select('role').eq('id', data.user.id).single()
-    const redirectTo = params.get('redirectTo')
-    if (redirectTo) { router.push(redirectTo); return }
-    router.push(profile?.role === 'artisan' ? '/dashboard/artisan' : '/dashboard/client')
+      const { error: authErr, data } = await supabase.auth.signInWithPassword({ email, password })
+      if (authErr) {
+        setError(authErr.message)
+        setLoading(false)
+        return
+      }
+
+      // Fetch role, default to artisan if the query fails
+      let destination = '/dashboard/artisan'
+      try {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', data.user.id)
+          .single()
+        if (profile?.role === 'client') destination = '/dashboard/client'
+      } catch {
+        // role fetch failed — fall through to default
+      }
+
+      const redirectTo = params.get('redirectTo')
+      router.push(redirectTo || destination)
+    } catch (err: any) {
+      setError(err?.message || 'Une erreur est survenue. Réessayez.')
+      setLoading(false)
+    }
   }
 
   return (
@@ -50,7 +73,25 @@ function LoginForm() {
           </div>
           <div className="form-group">
             <label>Mot de passe</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} required autoComplete="current-password" />
+            <div style={{ position: 'relative' }}>
+              <input
+                type={showPwd ? 'text' : 'password'}
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                required
+                autoComplete="current-password"
+                style={{ paddingRight: 44 }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPwd(v => !v)}
+                tabIndex={-1}
+                style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--c-text-muted)', display: 'flex', padding: 0, lineHeight: 0 }}
+                aria-label={showPwd ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+              >
+                {showPwd ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </div>
           <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: 8 }} disabled={loading}>
             {loading ? <span className="waitlist-spinner"></span> : null}
