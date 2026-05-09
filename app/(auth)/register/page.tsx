@@ -18,6 +18,7 @@ export default function RegisterPage() {
     setError('')
     if (!fields.prenom) return setError('Prénom requis')
     if (!fields.nom) return setError('Nom requis')
+    if (role === 'artisan' && !fields.phone) return setError('Numéro de téléphone requis pour les artisans')
     if (fields.password.length < 8) return setError('Mot de passe trop court (8 caractères min)')
 
     setLoading(true)
@@ -45,6 +46,32 @@ export default function RegisterPage() {
           ville: '',
           actif: false,
         })
+      }
+
+      // Sync to Brevo contacts
+      try {
+        await fetch('https://api.brevo.com/v3/contacts', {
+          method: 'POST',
+          headers: {
+            'accept': 'application/json',
+            'content-type': 'application/json',
+            'api-key': process.env.NEXT_PUBLIC_BREVO_API_KEY || '',
+          },
+          body: JSON.stringify({
+            email: fields.email,
+            attributes: {
+              PRENOM: fields.prenom || '',
+              NOM: fields.nom || '',
+              SMS: fields.phone || '',
+              ROLE: role,
+              METIER: '',
+            },
+            listIds: [3],
+            updateEnabled: true,
+          }),
+        })
+      } catch {
+        // Non-blocking — registration succeeds even if Brevo sync fails
       }
     }
     router.push(role === 'artisan' ? '/dashboard/artisan' : '/dashboard/client')
@@ -89,7 +116,10 @@ export default function RegisterPage() {
             <div className="form-group"><label>Prénom *</label><input type="text" value={fields.prenom} onChange={set('prenom')} required /></div>
             <div className="form-group"><label>Nom *</label><input type="text" value={fields.nom} onChange={set('nom')} required /></div>
           </div>
-          <div className="form-group"><label>Téléphone</label><input type="tel" value={fields.phone} onChange={set('phone')} placeholder="06 12 34 56 78" /></div>
+          <div className="form-group">
+            <label>Téléphone {role === 'artisan' ? '*' : <span style={{ fontSize: 11, color: 'var(--c-text-muted)', fontWeight: 400 }}>(optionnel)</span>}</label>
+            <input type="tel" value={fields.phone} onChange={set('phone')} placeholder="06 12 34 56 78" required={role === 'artisan'} />
+          </div>
           <div className="form-group"><label>Email *</label><input type="email" value={fields.email} onChange={set('email')} required autoComplete="email" /></div>
           <div className="form-group"><label>Mot de passe *</label><input type="password" value={fields.password} onChange={set('password')} required autoComplete="new-password" minLength={8} /></div>
 
