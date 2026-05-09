@@ -1,13 +1,12 @@
 'use client'
 import Link from 'next/link'
 import { useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Suspense } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 
 function LoginForm() {
-  const router = useRouter()
   const params = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -29,7 +28,7 @@ function LoginForm() {
         return
       }
 
-      // Fetch role, default to artisan if the query fails
+      // Fetch role to pick the right dashboard — default to artisan on any failure
       let destination = '/dashboard/artisan'
       try {
         const { data: profile } = await supabase
@@ -39,11 +38,13 @@ function LoginForm() {
           .single()
         if (profile?.role === 'client') destination = '/dashboard/client'
       } catch {
-        // role fetch failed — fall through to default
+        // fall through to default
       }
 
       const redirectTo = params.get('redirectTo')
-      router.push(redirectTo || destination)
+      // Hard redirect so middleware re-reads the session cookies on a fresh
+      // request — avoids the soft-navigation spinner that never unmounts.
+      window.location.href = redirectTo || destination
     } catch (err: any) {
       setError(err?.message || 'Une erreur est survenue. Réessayez.')
       setLoading(false)
