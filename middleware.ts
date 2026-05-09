@@ -13,30 +13,46 @@ export async function middleware(request: NextRequest) {
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
           supabaseResponse = NextResponse.next({ request })
-          cookiesToSet.forEach(({ name, value, options }) => supabaseResponse.cookies.set(name, value, options))
+          cookiesToSet.forEach(({ name, value, options }) =>
+            supabaseResponse.cookies.set(name, value, options)
+          )
         },
       },
     }
   )
 
   const { data: { user } } = await supabase.auth.getUser()
-  const { pathname } = request.nextUrl
+  const path = request.nextUrl.pathname
 
   // Protect dashboard routes
-  if (pathname.startsWith('/dashboard') && !user) {
-    return NextResponse.redirect(new URL(`/login?redirectTo=${encodeURIComponent(pathname)}`, request.url))
+  if (path.startsWith('/dashboard') && !user) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    url.searchParams.set('redirectTo', path)
+    return NextResponse.redirect(url)
   }
 
-  // Redirect logged-in users from auth pages
-  if (user && (pathname === '/login' || pathname === '/register')) {
-    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-    const dest = profile?.role === 'artisan' ? '/dashboard/artisan' : '/dashboard/client'
-    return NextResponse.redirect(new URL(dest, request.url))
+  // Redirect logged-in users away from auth pages
+  if ((path === '/login' || path === '/register') && user) {
+    const url = request.nextUrl.clone()
+    // Get user role to redirect correctly
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single()
+
+    url.pathname = profile?.role === 'artisan'
+      ? '/dashboard/artisan'
+      : '/dashboard/client'
+    return NextResponse.redirect(url)
   }
 
   return supabaseResponse
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/login', '/register'],
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
 }

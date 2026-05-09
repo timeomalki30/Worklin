@@ -1,254 +1,252 @@
 'use client'
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
-import Link from 'next/link'
-import { formatCurrency } from '@/lib/utils'
-import { TrendingUp, FileText, Wrench, Star, ArrowRight, Clock, CheckCircle, AlertCircle, Sparkles, Receipt, Users } from 'lucide-react'
-import { statusBadge } from '@/components/ui/badge'
+import type { Reservation, Devis } from '@/types'
+import { format } from 'date-fns'
+import { fr } from 'date-fns/locale'
 
-export default function DashboardPage() {
-  const router = useRouter()
-  const [artisanId, setArtisanId] = useState<string | null>(null)
-  const [profile, setProfile] = useState<any>(null)
-  const [kpis, setKpis] = useState({ ca_mois: 0, devis_attente: 0, chantiers_actifs: 0, note: 0 })
-  const [recentDevis, setRecentDevis] = useState<any[]>([])
-  const [demandes, setDemandes] = useState<any[]>([])
-  const [upcomingRdv, setUpcomingRdv] = useState<any[]>([])
+interface KPIData {
+  ca_mois: number
+  devis_en_attente: number
+  rdv_semaine: number
+  clients_total: number
+  ca_prev: number
+}
+
+export default function ArtisanDashboardPage() {
+  const [kpis, setKpis] = useState<KPIData>({ ca_mois: 0, devis_en_attente: 0, rdv_semaine: 0, clients_total: 0, ca_prev: 0 })
+  const [reservations, setReservations] = useState<Reservation[]>([])
+  const [recentDevis, setRecentDevis] = useState<Devis[]>([])
   const [loading, setLoading] = useState(true)
-  const [conformite, setConformite] = useState({ ok: false, missing: [] as string[] })
+  const [artisanId, setArtisanId] = useState<string | null>(null)
+  const [prenom, setPrenom] = useState('Artisan')
+  const [online, setOnline] = useState(true)
 
   useEffect(() => {
     const load = async () => {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.push('/login'); return }
+      if (!user) return
 
-      const [{ data: p }, { data: a }] = await Promise.all([
-        supabase.from('profiles').select('*').eq('id', user.id).single(),
-        supabase.from('artisans').select('*').eq('profile_id', user.id).single(),
-      ])
-      setProfile(p)
-      if (!a) return
+      const { data: profile } = await supabase.from('profiles').select('prenom').eq('id', user.id).single()
+      setPrenom(profile?.prenom || 'Artisan')
 
-      setArtisanId(a.id)
+      const { data: artisan } = await supabase.from('artisans').select('id').eq('profile_id', user.id).single()
+      if (!artisan) { setLoading(false); return }
+      setArtisanId(artisan.id)
 
       const now = new Date()
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
+      const prevFirst = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0]
+      const prevLast = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0]
+      const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay() + 1)
+      const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6)
 
-      const today = new Date().toISOString().split('T')[0]
-      const [{ data: factures }, { data: devis }, { data: chantiers }, { data: demandesData }, { data: rdvData }] = await Promise.all([
-        supabase.from('factures').select('total_ttc, statut').eq('artisan_id', a.id).gte('date_emission', startOfMonth).in('statut', ['envoyee', 'payee']),
-        supabase.from('devis').select('*, clients(nom, prenom)').eq('artisan_id', a.id).order('created_at', { ascending: false }).limit(5),
-        supabase.from('chantiers').select('id').eq('artisan_id', a.id).eq('statut', 'en_cours'),
-        supabase.from('demandes').select('*').eq('artisan_id', a.id).eq('statut', 'nouveau').order('created_at', { ascending: false }).limit(5),
-        supabase.from('agenda').select('*, clients(nom, prenom)').eq('artisan_id', a.id).gte('date', today).neq('statut', 'annule').order('date').order('heure').limit(4),
+      const [factures, facturesPrev, devisAttente, rdvWeek, clients] = await Promise.all([
+        supabase.from('factures').select('total_ttc').eq('artisan_id', artisan.id).eq('statut', 'payee').gte('date_emission', firstDay),
+        supabase.from('factures').select('total_ttc').eq('artisan_id', artisan.id).eq('statut', 'payee').gte('date_emission', prevFirst).lte('date_emission', prevLast),
+        supabase.from('devis').select('*', { count: 'exact', head: true }).eq('artisan_id', artisan.id).eq('statut', 'envoye'),
+        supabase.from('reservations').select('*', { count: 'exact', head: true }).eq('artisan_id', artisan.id).gte('date', weekStart.toISOString().split('T')[0]).lte('date', weekEnd.toISOString().split('T')[0]),
+        supabase.from('clients_artisan').select('*', { count: 'exact', head: true }).eq('artisan_id', artisan.id),
       ])
 
-      const ca = (factures || []).reduce((s: number, f: any) => s + (f.total_ttc || 0), 0)
-      const devisAttente = (devis || []).filter((d: any) => d.statut === 'envoye').length
+      const ca = (factures.data || []).reduce((s, f) => s + (f.total_ttc || 0), 0)
+      const caPrev = (facturesPrev.data || []).reduce((s, f) => s + (f.total_ttc || 0), 0)
+      setKpis({ ca_mois: ca, ca_prev: caPrev, devis_en_attente: devisAttente.count || 0, rdv_semaine: rdvWeek.count || 0, clients_total: clients.count || 0 })
 
-      setKpis({
-        ca_mois: ca,
-        devis_attente: devisAttente,
-        chantiers_actifs: chantiers?.length || 0,
-        note: a.note_moyenne || 0,
-      })
-      setRecentDevis(devis || [])
-      setDemandes(demandesData || [])
-      setUpcomingRdv(rdvData || [])
-
-      // Conformité
-      const missing = []
-      if (!a.siret) missing.push('SIRET')
-      if (!a.tva) missing.push('N° TVA')
-      if (!p?.phone) missing.push('Téléphone')
-      setConformite({ ok: missing.length === 0, missing })
-
+      const [{ data: rdvs }, { data: dvs }] = await Promise.all([
+        supabase.from('reservations').select('*, profiles(prenom, nom)').eq('artisan_id', artisan.id).gte('date', now.toISOString().split('T')[0]).order('date').order('heure').limit(5),
+        supabase.from('devis').select('*, clients_artisan(nom, prenom)').eq('artisan_id', artisan.id).order('created_at', { ascending: false }).limit(4),
+      ])
+      setReservations(rdvs || [])
+      setRecentDevis(dvs || [])
       setLoading(false)
     }
     load()
-  }, [router])
+  }, [])
 
-  if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="spinner w-8 h-8 border-navy-800" />
-    </div>
-  )
+  const caVariation = kpis.ca_prev > 0 ? ((kpis.ca_mois - kpis.ca_prev) / kpis.ca_prev) * 100 : 0
 
-  const kpiCards = [
-    { label: 'CA ce mois', value: formatCurrency(kpis.ca_mois), icon: <TrendingUp size={20} />, color: 'bg-terra-500', change: '+12%' },
-    { label: 'Devis en attente', value: kpis.devis_attente, icon: <FileText size={20} />, color: 'bg-navy-700', href: '/dashboard/artisan/devis' },
-    { label: 'Chantiers actifs', value: kpis.chantiers_actifs, icon: <Wrench size={20} />, color: 'bg-navy-600', href: '/dashboard/artisan/chantiers' },
-    { label: 'Note moyenne', value: kpis.note > 0 ? `${kpis.note.toFixed(1)} ★` : '—', icon: <Star size={20} />, color: 'bg-yellow-500' },
-  ]
+  if (loading) return <div style={{ textAlign: 'center', padding: 64, color: 'var(--c-text-muted)' }}>Chargement…</div>
 
   return (
-    <div className="space-y-8">
+    <div>
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28, flexWrap: 'wrap', gap: 16 }}>
         <div>
-          <h1 className="text-3xl font-black text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>
-            Bonjour, {profile?.prenom} 👋
+          <h1 style={{ fontSize: 'var(--fs-3xl)', marginBottom: 4, letterSpacing: '-0.025em' }}>
+            Bonjour <span style={{ fontFamily: 'var(--font-serif)', fontStyle: 'normal' }}>{prenom}</span> 👋
           </h1>
-          <p className="text-navy-400 mt-1">Voici un aperçu de votre activité</p>
+          <div style={{ color: 'var(--c-text-soft)', fontSize: 'var(--fs-md)' }}>
+            {format(new Date(), "EEEE d MMMM yyyy", { locale: fr })}
+          </div>
         </div>
-        <Link href="/dashboard/artisan/devis" className="btn btn-terra no-underline">
-          <FileText size={16} />
-          Nouveau devis
-        </Link>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', position: 'relative' }}>
+          <button
+            onClick={() => setOnline(o => !o)}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: 'var(--c-surface)', border: '1px solid var(--c-border)', borderRadius: 'var(--r-pill)', fontSize: 'var(--fs-sm)', fontWeight: 600, cursor: 'pointer', transition: 'all var(--transition-fast)', fontFamily: 'var(--font-head)' }}
+          >
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: online ? 'var(--c-success)' : 'var(--c-text-muted)', position: 'relative' }}></span>
+            {online ? 'En ligne' : 'Hors ligne'}
+          </button>
+          <Link href="/dashboard/artisan/devis" className="btn btn-primary btn-sm">
+            + Nouveau devis
+          </Link>
+        </div>
       </div>
 
-      {/* Conformité badge */}
-      {!conformite.ok && (
-        <div className="flex items-center gap-4 bg-yellow-50 border border-yellow-200 rounded-2xl p-4">
-          <AlertCircle size={20} className="text-yellow-600 flex-shrink-0" />
-          <div className="flex-1">
-            <div className="font-semibold text-yellow-800 text-sm">Complétez votre profil pour activer la conformité 2027</div>
-            <div className="text-xs text-yellow-700 mt-0.5">Manquant : {conformite.missing.join(', ')}</div>
-          </div>
-          <Link href="/dashboard/artisan/parametres" className="btn btn-sm bg-yellow-600 text-white hover:bg-yellow-700 no-underline">Compléter</Link>
-        </div>
-      )}
-      {conformite.ok && (
-        <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-2xl p-4">
-          <CheckCircle size={18} className="text-green-600 flex-shrink-0" />
-          <span className="text-sm font-semibold text-green-800">Profil conforme réforme facturation électronique 2027 ✓</span>
-        </div>
-      )}
-
       {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {kpiCards.map((k, i) => (
-          <div key={i} className={`kpi-card ${k.href ? 'cursor-pointer hover:shadow-md' : ''}`} onClick={() => k.href && router.push(k.href)}>
-            <div className={`w-10 h-10 ${k.color} rounded-xl grid place-items-center text-white mb-3`}>
-              {k.icon}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+        {[
+          {
+            label: 'CA ce mois',
+            value: kpis.ca_mois.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }),
+            trend: caVariation !== 0 ? `${caVariation > 0 ? '+' : ''}${caVariation.toFixed(0)} %` : null,
+            trendUp: caVariation >= 0,
+            icon: <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>,
+            color: 'var(--c-accent)',
+          },
+          {
+            label: 'Devis en attente',
+            value: kpis.devis_en_attente,
+            trend: null,
+            icon: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></>,
+            color: 'var(--c-primary)',
+          },
+          {
+            label: 'RDV cette semaine',
+            value: kpis.rdv_semaine,
+            trend: null,
+            icon: <><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></>,
+            color: 'var(--c-success)',
+          },
+          {
+            label: 'Clients totaux',
+            value: kpis.clients_total,
+            trend: null,
+            icon: <><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></>,
+            color: 'var(--c-primary)',
+          },
+        ].map((kpi, i) => (
+          <div key={i} style={{ background: 'var(--c-surface)', border: '1px solid var(--c-border)', borderRadius: 'var(--r-lg)', padding: 20, position: 'relative', overflow: 'hidden', transition: 'all var(--transition-fast)', cursor: 'default' }}>
+            <div style={{ position: 'absolute', top: 16, right: 16, width: 38, height: 38, borderRadius: 'var(--r-sm)', background: `${kpi.color}1a`, color: kpi.color, display: 'grid', placeItems: 'center' }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>{kpi.icon}</svg>
             </div>
-            <div className="text-2xl font-black text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>{k.value}</div>
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-semibold text-navy-400 uppercase tracking-wider">{k.label}</div>
-              {k.change && <span className="text-xs text-green-600 font-bold">{k.change}</span>}
-            </div>
+            <div style={{ fontSize: 12, color: 'var(--c-text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginBottom: 8, fontFamily: 'var(--font-head)' }}>{kpi.label}</div>
+            <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 'var(--fs-3xl)', color: 'var(--c-text)', lineHeight: 1.1, letterSpacing: '-0.03em' }}>{kpi.value}</div>
+            {kpi.trend && (
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 10, fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 'var(--r-pill)', fontFamily: 'var(--font-head)', background: kpi.trendUp ? 'var(--c-success-soft)' : 'rgba(184,58,42,0.1)', color: kpi.trendUp ? 'var(--c-success)' : 'var(--c-danger)' }}>
+                {kpi.trendUp ? '↑' : '↓'} {kpi.trend} vs mois dernier
+              </div>
+            )}
           </div>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Recent devis */}
-        <div className="lg:col-span-2 card overflow-hidden">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-cream-300">
-            <h2 className="font-bold text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>Derniers devis</h2>
-            <Link href="/dashboard/artisan/devis" className="text-sm text-terra-600 font-semibold hover:text-terra-700 no-underline flex items-center gap-1">
-              Voir tout <ArrowRight size={14} />
-            </Link>
-          </div>
-          {recentDevis.length === 0 ? (
-            <div className="p-8 text-center text-navy-400 text-sm">
-              <FileText size={32} className="mx-auto mb-3 opacity-30" />
-              <p>Aucun devis pour l&apos;instant</p>
-              <Link href="/dashboard/artisan/devis" className="btn btn-terra btn-sm mt-4 no-underline inline-flex">Créer mon premier devis</Link>
+      {/* Content grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 24 }}>
+        {/* Agenda du jour */}
+        <div>
+          <div style={{ background: 'var(--c-surface)', border: '1px solid var(--c-border)', borderRadius: 'var(--r-lg)', padding: 22, marginBottom: 24 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, paddingBottom: 16, borderBottom: '1px solid var(--c-border)' }}>
+              <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: 'var(--fs-lg)', display: 'flex', alignItems: 'center', gap: 10 }}>
+                Prochains RDV
+                {reservations.length > 0 && <span style={{ background: 'var(--c-accent)', color: 'white', padding: '2px 10px', fontSize: 12, fontWeight: 700, borderRadius: 'var(--r-pill)' }}>{reservations.length}</span>}
+              </div>
+              <Link href="/dashboard/artisan/agenda" className="btn btn-ghost btn-sm">Voir l&apos;agenda</Link>
             </div>
-          ) : (
-            <table className="w-table">
-              <thead>
-                <tr>
-                  <th>Numéro</th><th>Client</th><th>Montant</th><th>Statut</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentDevis.map(d => (
-                  <tr key={d.id}>
-                    <td className="font-bold text-navy-700">{d.numero}</td>
-                    <td className="text-navy-600">{d.clients ? `${d.clients.prenom || ''} ${d.clients.nom}`.trim() : '—'}</td>
-                    <td className="font-semibold">{formatCurrency(d.total_ttc)}</td>
-                    <td>{statusBadge(d.statut)}</td>
+            {reservations.length === 0 ? (
+              <p style={{ color: 'var(--c-text-muted)', textAlign: 'center', padding: '24px 0', fontSize: 'var(--fs-sm)' }}>Aucun RDV à venir. <Link href="/dashboard/artisan/agenda" style={{ color: 'var(--c-accent)' }}>Gérer les disponibilités →</Link></p>
+            ) : reservations.map(r => (
+              <div key={r.id} style={{ display: 'grid', gridTemplateColumns: '86px 4px 1fr auto', gap: 16, alignItems: 'center', padding: '14px 0', borderBottom: '1px solid var(--c-border)' }}>
+                <div>
+                  <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--c-text)', fontSize: 'var(--fs-md)', letterSpacing: '-0.02em' }}>{r.heure}</div>
+                  <small style={{ display: 'block', fontSize: 11, color: 'var(--c-text-muted)', fontWeight: 500 }}>{format(new Date(r.date), 'dd MMM', { locale: fr })}</small>
+                </div>
+                <div style={{ width: 4, background: r.statut === 'en_attente' ? 'var(--c-accent)' : 'var(--c-primary)', borderRadius: 2, height: 44 }}></div>
+                <div>
+                  <strong style={{ display: 'block', fontFamily: 'var(--font-head)', fontSize: 'var(--fs-md)' }}>{r.profiles?.prenom} {r.profiles?.nom}</strong>
+                  <span style={{ color: 'var(--c-text-soft)', fontSize: 'var(--fs-sm)' }}>{r.description_travaux || 'Prestation'}</span>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                    <span className={`status-badge ${r.statut}`}>{r.statut.replace('_', ' ')}</span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <Link href="/dashboard/artisan/agenda" style={{ width: 34, height: 34, borderRadius: 'var(--r-sm)', background: 'var(--c-bg)', color: 'var(--c-text-soft)', display: 'grid', placeItems: 'center', border: '1px solid transparent', transition: 'all var(--transition-fast)' }}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Devis récents */}
+          <div style={{ background: 'var(--c-surface)', border: '1px solid var(--c-border)', borderRadius: 'var(--r-lg)', padding: 22 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, paddingBottom: 16, borderBottom: '1px solid var(--c-border)' }}>
+              <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: 'var(--fs-lg)' }}>Devis récents</div>
+              <Link href="/dashboard/artisan/devis" className="btn btn-ghost btn-sm">Tous les devis</Link>
+            </div>
+            {recentDevis.length === 0 ? (
+              <p style={{ color: 'var(--c-text-muted)', textAlign: 'center', padding: '24px 0', fontSize: 'var(--fs-sm)' }}>
+                Aucun devis. <Link href="/dashboard/artisan/devis" style={{ color: 'var(--c-accent)' }}>Créer un devis →</Link>
+              </p>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ fontSize: 'var(--fs-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--c-text-muted)', fontFamily: 'var(--font-head)' }}>
+                    <th style={{ textAlign: 'left', padding: '0 0 12px', fontWeight: 700 }}>N°</th>
+                    <th style={{ textAlign: 'left', padding: '0 0 12px', fontWeight: 700 }}>Client</th>
+                    <th style={{ textAlign: 'left', padding: '0 0 12px', fontWeight: 700 }}>Statut</th>
+                    <th style={{ textAlign: 'right', padding: '0 0 12px', fontWeight: 700 }}>Montant</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        {/* Side panels */}
-        <div className="flex flex-col gap-6">
-          {/* Nouvelles demandes */}
-          <div className="card overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-cream-300">
-              <h2 className="font-bold text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>Nouvelles demandes</h2>
-              {demandes.length > 0 && <span className="badge badge-terra">{demandes.length}</span>}
-            </div>
-            {demandes.length === 0 ? (
-              <div className="p-6 text-center text-navy-400 text-sm">
-                <Clock size={28} className="mx-auto mb-3 opacity-30" />
-                <p>Aucune nouvelle demande</p>
-                <Link href="/dashboard/artisan/vitrine" className="text-terra-600 font-semibold text-xs mt-2 block no-underline">Activez votre vitrine →</Link>
-              </div>
-            ) : (
-              <div className="divide-y divide-cream-300">
-                {demandes.map(d => (
-                  <div key={d.id} className="p-4">
-                    <div className="font-semibold text-sm text-navy-800">{d.nom}</div>
-                    <p className="text-xs text-navy-500 mt-1 line-clamp-2">{d.description}</p>
-                    <div className="flex gap-2 mt-3">
-                      <Link href={`/dashboard/artisan/devis?demande=${d.id}`} className="btn btn-sm btn-terra no-underline">Créer devis</Link>
-                      <span className="text-xs text-navy-400 self-center">{new Date(d.created_at).toLocaleDateString('fr-FR')}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Prochains RDV */}
-          <div className="card overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-cream-300">
-              <h2 className="font-bold text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>Prochains RDV</h2>
-              <Link href="/dashboard/artisan/agenda" className="text-xs text-terra-600 font-semibold no-underline hover:text-terra-700">Agenda →</Link>
-            </div>
-            {upcomingRdv.length === 0 ? (
-              <div className="p-6 text-center text-navy-400 text-sm">
-                <Clock size={28} className="mx-auto mb-3 opacity-30" />
-                <p>Aucun RDV à venir</p>
-                <Link href="/dashboard/artisan/agenda" className="text-terra-600 font-semibold text-xs mt-2 block no-underline">Planifier un RDV →</Link>
-              </div>
-            ) : (
-              <div className="divide-y divide-cream-300">
-                {upcomingRdv.map(ev => (
-                  <div key={ev.id} className="p-4">
-                    <div className="font-semibold text-sm text-navy-800">{ev.titre || 'RDV'}</div>
-                    <div className="text-xs text-navy-500 mt-1">
-                      {new Date(ev.date).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })} · {ev.heure}
-                      {ev.duree && ` · ${ev.duree}min`}
-                    </div>
-                    {ev.clients && <div className="text-xs text-navy-400 mt-0.5">{(ev.clients as any).prenom} {(ev.clients as any).nom}</div>}
-                  </div>
-                ))}
-              </div>
+                </thead>
+                <tbody>
+                  {recentDevis.map(d => (
+                    <tr key={d.id} style={{ borderTop: '1px solid var(--c-border)', fontSize: 'var(--fs-sm)' }}>
+                      <td style={{ padding: '12px 0', fontFamily: 'var(--font-head)', fontWeight: 600 }}>{d.numero}</td>
+                      <td style={{ padding: '12px 0', color: 'var(--c-text-soft)' }}>{d.clients_artisan?.prenom} {d.clients_artisan?.nom}</td>
+                      <td style={{ padding: '12px 0' }}><span className={`status-badge ${d.statut}`}>{d.statut}</span></td>
+                      <td style={{ padding: '12px 0', textAlign: 'right', fontFamily: 'var(--font-head)', fontWeight: 700 }}>{d.total_ttc.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
         </div>
-      </div>
 
-      {/* Quick actions */}
-      <div>
-        <h2 className="font-bold text-navy-800 mb-4" style={{ fontFamily: 'var(--font-manrope)' }}>Actions rapides</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[
-            { label: 'Nouveau devis', href: '/dashboard/artisan/devis', icon: <FileText size={20} /> },
-            { label: 'Nouvelle facture', href: '/dashboard/artisan/factures', icon: <Receipt size={20} /> },
-            { label: 'Ajouter un client', href: '/dashboard/artisan/clients', icon: <Users size={20} /> },
-            { label: 'Devis IA', href: '/dashboard/artisan/ia', icon: <Sparkles size={20} />, terra: true },
-          ].map(({ label, href, icon, terra }) => (
-            <Link key={href} href={href} className={`card p-5 flex flex-col items-start gap-3 hover:shadow-md no-underline group ${terra ? 'border-terra-200 bg-terra-50/50' : ''}`}>
-              <div className={`w-10 h-10 rounded-xl grid place-items-center ${terra ? 'bg-terra-500 text-white' : 'bg-cream-200 text-navy-700'} group-hover:scale-110 transition-transform`}>
-                {icon}
-              </div>
-              <span className={`font-semibold text-sm ${terra ? 'text-terra-700' : 'text-navy-700'}`}>{label}</span>
+        {/* Droite */}
+        <div>
+          {/* Actions rapides */}
+          <div style={{ background: 'var(--c-surface)', border: '1px solid var(--c-border)', borderRadius: 'var(--r-lg)', padding: 22, marginBottom: 24 }}>
+            <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: 'var(--fs-lg)', marginBottom: 18, paddingBottom: 16, borderBottom: '1px solid var(--c-border)' }}>Actions rapides</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+              {[
+                { href: '/dashboard/artisan/devis', icon: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></>, t: 'Nouveau devis', s: 'Créer & envoyer' },
+                { href: '/dashboard/artisan/factures', icon: <><rect x="1" y="4" width="22" height="16" rx="2"/><path d="M1 10h22"/></>, t: 'Nouvelle facture', s: 'Facturer client' },
+                { href: '/dashboard/artisan/clients', icon: <><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></>, t: 'Ajouter client', s: 'Base de données' },
+                { href: '/dashboard/artisan/agenda', icon: <><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></>, t: 'Gérer l\'agenda', s: 'Disponibilités' },
+              ].map((a, i) => (
+                <Link key={i} href={a.href} style={{ padding: 16, border: '1px solid var(--c-border)', borderRadius: 'var(--r-md)', background: 'var(--c-surface)', cursor: 'pointer', transition: 'all var(--transition-fast)', textAlign: 'left', textDecoration: 'none', color: 'inherit', display: 'block' }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 22, height: 22, color: 'var(--c-primary)', marginBottom: 8 }}>{a.icon}</svg>
+                  <strong style={{ display: 'block', fontSize: 'var(--fs-sm)', marginBottom: 2, fontFamily: 'var(--font-head)', color: 'var(--c-text)' }}>{a.t}</strong>
+                  <span style={{ color: 'var(--c-text-muted)', fontSize: 12 }}>{a.s}</span>
+                </Link>
+              ))}
+            </div>
+          </div>
+
+          {/* Lien vers paramètres */}
+          <div style={{ background: 'var(--c-primary)', borderRadius: 'var(--r-lg)', padding: 22, color: 'white' }}>
+            <h4 style={{ color: 'white', fontSize: 'var(--fs-md)', marginBottom: 8 }}>Complétez votre profil</h4>
+            <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: 'var(--fs-sm)', marginBottom: 16 }}>Ajoutez votre SIRET, TVA, certifications pour apparaître dans les résultats.</p>
+            <Link href="/dashboard/artisan/parametres" className="btn btn-sm" style={{ background: 'white', color: 'var(--c-primary)', fontFamily: 'var(--font-head)', fontWeight: 700 }}>
+              Compléter mon profil →
             </Link>
-          ))}
+          </div>
         </div>
       </div>
     </div>
   )
 }
-

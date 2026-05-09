@@ -1,306 +1,257 @@
 'use client'
-export const dynamic = 'force-dynamic'
 import { useEffect, useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/client'
-import { Search, Star, MapPin, Calendar, CheckCircle, Clock, ArrowRight, LogOut } from 'lucide-react'
 import type { Profile } from '@/types'
 
 const STATUS_LABELS: Record<string, string> = {
-  planifie: 'Planifié', confirme: 'Confirmé', annule: 'Annulé', termine: 'Terminé',
+  en_attente: 'En attente',
+  confirmee: 'Confirmée',
+  annulee: 'Annulée',
+  terminee: 'Terminée',
 }
-const STATUS_COLORS: Record<string, string> = {
-  planifie: 'bg-blue-100 text-blue-800',
-  confirme: 'bg-green-100 text-green-800',
-  annule: 'bg-gray-100 text-gray-600',
-  termine: 'bg-gray-100 text-gray-600',
+const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
+  en_attente: { bg: '#FEF9C3', text: '#854D0E' },
+  confirmee: { bg: '#DCFCE7', text: '#14532D' },
+  annulee: { bg: '#FEE2E2', text: '#7F1D1D' },
+  terminee: { bg: '#F3F4F6', text: '#374151' },
 }
 
 export default function ClientDashboardPage() {
   const router = useRouter()
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [rdvs, setRdvs] = useState<any[]>([])
+  const [reservations, setReservations] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [searchResults, setSearchResults] = useState<any[]>([])
-  const [searching, setSearching] = useState(false)
-  const [showAvis, setShowAvis] = useState<string | null>(null)
-  const [avisForm, setAvisForm] = useState({ note: 5, commentaire: '', client_nom: '' })
-  const [submitting, setSubmitting] = useState(false)
+  const [showAvisModal, setShowAvisModal] = useState(false)
+  const [selectedRdv, setSelectedRdv] = useState<any>(null)
+  const [avisForm, setAvisForm] = useState({ note: 5, commentaire: '' })
+  const [submittingAvis, setSubmittingAvis] = useState(false)
 
   useEffect(() => {
     const load = async () => {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
+
       const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).single()
       setProfile(p)
-      const { data: events } = await supabase
-        .from('agenda')
+
+      const { data: rdvs } = await supabase
+        .from('reservations')
         .select('*, artisans(id, metier, entreprise, profiles(nom, prenom))')
         .eq('client_id', user.id)
         .order('date', { ascending: false })
-      setRdvs(events || [])
+        .order('heure', { ascending: false })
+      setReservations(rdvs || [])
       setLoading(false)
     }
     load()
   }, [router])
 
-  const handleSearch = async () => {
-    if (!search.trim()) return
-    setSearching(true)
-    const supabase = createClient()
-    const { data } = await supabase
-      .from('artisans')
-      .select('*, profiles(nom, prenom, phone)')
-      .ilike('metier', `%${search}%`)
-      .eq('actif', true)
-      .limit(12)
-    setSearchResults(data || [])
-    setSearching(false)
-  }
-
-  const submitAvis = async (artisanId: string) => {
-    if (!avisForm.client_nom || !artisanId) return
-    setSubmitting(true)
-    const supabase = createClient()
-    await supabase.from('avis').insert({
-      artisan_id: artisanId,
-      client_nom: avisForm.client_nom || `${profile?.prenom} ${profile?.nom}`,
-      note: avisForm.note,
-      commentaire: avisForm.commentaire,
-      source: 'dashboard',
-    })
-    // Update note moyenne
-    const { data: avisData } = await supabase.from('avis').select('note').eq('artisan_id', artisanId)
-    if (avisData && avisData.length > 0) {
-      const avg = avisData.reduce((s: number, a: any) => s + a.note, 0) / avisData.length
-      await supabase.from('artisans').update({ note_moyenne: avg, nb_avis: avisData.length }).eq('id', artisanId)
-    }
-    setShowAvis(null)
-    setSubmitting(false)
-  }
-
   const handleLogout = async () => {
-    await createClient().auth.signOut()
+    const supabase = createClient()
+    await supabase.auth.signOut()
     router.push('/')
   }
 
-  const upcoming = rdvs.filter(r => r.date >= new Date().toISOString().split('T')[0] && r.statut !== 'annule')
-  const past = rdvs.filter(r => r.statut === 'termine')
+  const openAvisModal = (rdv: any) => {
+    setSelectedRdv(rdv)
+    setAvisForm({ note: 5, commentaire: '' })
+    setShowAvisModal(true)
+  }
 
-  if (loading) return <div className="min-h-screen bg-cream-200 flex items-center justify-center"><div className="spinner w-8 h-8 border-navy-800" /></div>
+  const submitAvis = async () => {
+    if (!selectedRdv || !profile) return
+    setSubmittingAvis(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    await supabase.from('avis').insert({
+      artisan_id: selectedRdv.artisan_id,
+      client_id: user?.id,
+      note: avisForm.note,
+      commentaire: avisForm.commentaire,
+      reservation_id: selectedRdv.id,
+    })
+
+    const { data: avisData } = await supabase.from('avis').select('note').eq('artisan_id', selectedRdv.artisan_id)
+    if (avisData && avisData.length > 0) {
+      const avg = avisData.reduce((s, a) => s + a.note, 0) / avisData.length
+      await supabase.from('artisans').update({ note_moyenne: avg, nb_avis: avisData.length }).eq('id', selectedRdv.artisan_id)
+    }
+
+    setShowAvisModal(false)
+    setSubmittingAvis(false)
+  }
+
+  const upcoming = reservations.filter(r => r.date >= new Date().toISOString().split('T')[0] && r.statut !== 'annulee')
+  const past = reservations.filter(r => r.date < new Date().toISOString().split('T')[0] || r.statut === 'terminee')
+
+  if (loading) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Chargement…</div>
 
   return (
-    <div className="min-h-screen bg-cream-200">
+    <div style={{ minHeight: '100vh', background: 'var(--c-bg)' }}>
       {/* Nav */}
-      <nav className="sticky top-0 z-50 bg-navy-800 text-white">
-        <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 no-underline">
-            <div className="w-7 h-7 bg-terra-500 rounded-lg grid place-items-center">
-              <span className="text-white font-black text-xs">W</span>
-            </div>
-            <span className="font-black text-white text-lg" style={{ fontFamily: 'var(--font-manrope)' }}>Worklin</span>
-          </Link>
-          <div className="flex items-center gap-4">
-            <span className="text-white/60 text-sm">{profile?.prenom} {profile?.nom}</span>
-            <button onClick={handleLogout} className="flex items-center gap-1.5 text-white/60 hover:text-white text-sm transition-colors">
-              <LogOut size={15} /> Déconnexion
-            </button>
-          </div>
+      <nav style={{ background: 'var(--c-text)', padding: '0 48px', height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100 }}>
+        <Link href="/" style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 'var(--fs-lg)', color: 'white', letterSpacing: '-0.025em', textDecoration: 'none' }}>
+          Worklin <span style={{ color: 'var(--c-accent)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', marginLeft: 4 }}>client</span>
+        </Link>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+          <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 'var(--fs-sm)' }}>{profile?.prenom} {profile?.nom}</span>
+          <button onClick={handleLogout} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: 'rgba(255,255,255,0.8)', padding: '8px 16px', borderRadius: 'var(--r-md)', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-head)', fontWeight: 600 }}>
+            Déconnexion
+          </button>
         </div>
       </nav>
 
-      <div className="max-w-5xl mx-auto px-6 py-10 space-y-10">
-        {/* Hero */}
-        <div>
-          <h1 className="text-3xl font-black text-navy-800 mb-2" style={{ fontFamily: 'var(--font-manrope)' }}>
+      <div className="container" style={{ paddingTop: 48, paddingBottom: 96 }}>
+        <div style={{ marginBottom: 40 }}>
+          <h1 style={{ fontSize: 'var(--fs-3xl)', fontFamily: 'var(--font-head)', fontWeight: 800, marginBottom: 8 }}>
             Bonjour, {profile?.prenom} 👋
           </h1>
-          <p className="text-navy-500">Trouvez un artisan de confiance ou consultez vos rendez-vous.</p>
+          <p style={{ color: 'var(--c-text-muted)' }}>
+            {upcoming.length > 0 ? `Vous avez ${upcoming.length} RDV à venir.` : 'Vous n\'avez pas de RDV à venir.'}
+            {' '}
+            <Link href="/recherche" style={{ color: 'var(--c-accent)', fontWeight: 600 }}>Trouver un artisan →</Link>
+          </p>
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-4">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 48 }}>
           {[
-            { label: 'RDV à venir', value: upcoming.length, icon: <Calendar size={20} />, color: 'bg-terra-500' },
-            { label: 'Interventions', value: past.length, icon: <CheckCircle size={20} />, color: 'bg-green-500' },
-            { label: 'Artisans contactés', value: new Set(rdvs.map(r => r.artisan_id)).size, icon: <Star size={20} />, color: 'bg-navy-600' },
-          ].map((s, i) => (
-            <div key={i} className="card p-5 flex items-center gap-4">
-              <div className={`w-10 h-10 ${s.color} rounded-xl grid place-items-center text-white flex-shrink-0`}>{s.icon}</div>
-              <div>
-                <div className="text-2xl font-black text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>{s.value}</div>
-                <div className="text-xs font-semibold text-navy-400 uppercase tracking-wide">{s.label}</div>
-              </div>
+            { label: 'RDV à venir', value: upcoming.length, icon: '📅' },
+            { label: 'Interventions terminées', value: past.filter(r => r.statut === 'terminee').length, icon: '✅' },
+            { label: 'Avis laissés', value: 0, icon: '⭐' },
+          ].map(s => (
+            <div key={s.label} style={{ background: 'var(--c-surface)', borderRadius: 'var(--r-lg)', border: '1px solid var(--c-border)', padding: '20px 24px' }}>
+              <div style={{ fontSize: 28, marginBottom: 8 }}>{s.icon}</div>
+              <div style={{ fontSize: 'var(--fs-2xl)', fontFamily: 'var(--font-head)', fontWeight: 800, marginBottom: 4 }}>{s.value}</div>
+              <div style={{ fontSize: 12, color: 'var(--c-text-muted)', fontFamily: 'var(--font-head)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{s.label}</div>
             </div>
           ))}
         </div>
 
-        {/* Search artisans */}
-        <div className="card p-6">
-          <h2 className="font-bold text-navy-800 mb-4" style={{ fontFamily: 'var(--font-manrope)' }}>Trouver un artisan</h2>
-          <div className="flex gap-3">
-            <div className="relative flex-1">
-              <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-navy-400" />
-              <input
-                className="form-input pl-10"
-                placeholder="Plombier, Électricien, Peintre…"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleSearch()}
-              />
-            </div>
-            <button onClick={handleSearch} disabled={searching} className="btn btn-terra">
-              {searching ? <span className="spinner" /> : <Search size={16} />}
-              Rechercher
-            </button>
-          </div>
-          {searchResults.length > 0 && (
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              {searchResults.map(a => {
-                const name = a.entreprise || `${a.profiles?.prenom} ${a.profiles?.nom}`
-                return (
-                  <Link key={a.id} href={`/${a.slug}`} className="flex items-start gap-4 p-4 rounded-xl border border-cream-300 hover:border-terra-300 hover:bg-terra-50/30 no-underline transition-all group">
-                    <div className="w-12 h-12 bg-navy-800 rounded-xl grid place-items-center text-white font-black text-base flex-shrink-0" style={{ fontFamily: 'var(--font-manrope)' }}>
-                      {name[0]?.toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-bold text-navy-800 text-sm truncate">{name}</div>
-                      <div className="text-xs text-terra-600 font-semibold capitalize">{a.metier}</div>
-                      {a.ville && <div className="flex items-center gap-1 text-xs text-navy-400 mt-1"><MapPin size={11} />{a.ville}</div>}
-                      {a.note_moyenne && (
-                        <div className="flex items-center gap-1 text-xs text-navy-500 mt-1">
-                          <Star size={11} className="text-yellow-400 fill-yellow-400" />
-                          <span className="font-semibold">{a.note_moyenne.toFixed(1)}</span>
-                          <span>({a.nb_avis} avis)</span>
-                        </div>
-                      )}
-                    </div>
-                    <ArrowRight size={16} className="text-navy-300 group-hover:text-terra-500 flex-shrink-0 mt-1 transition-colors" />
-                  </Link>
-                )
-              })}
-            </div>
-          )}
-          {searchResults.length === 0 && search && !searching && (
-            <p className="text-sm text-navy-400 mt-4 text-center">Aucun artisan trouvé pour &ldquo;{search}&rdquo;.</p>
-          )}
-        </div>
-
         {/* Upcoming RDV */}
         {upcoming.length > 0 && (
-          <div className="card overflow-hidden">
-            <div className="px-6 py-4 border-b border-cream-300">
-              <h2 className="font-bold text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>Rendez-vous à venir</h2>
-            </div>
-            <div className="divide-y divide-cream-300">
+          <section style={{ marginBottom: 48 }}>
+            <h2 style={{ fontSize: 'var(--fs-xl)', fontFamily: 'var(--font-head)', fontWeight: 800, marginBottom: 20 }}>RDV à venir</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {upcoming.map(r => {
+                const colors = STATUS_COLORS[r.statut]
                 const artisanName = r.artisans?.entreprise || `${r.artisans?.profiles?.prenom} ${r.artisans?.profiles?.nom}`
-                const statusClass = STATUS_COLORS[r.statut || 'planifie']
                 return (
-                  <div key={r.id} className="p-5 flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 bg-cream-200 rounded-xl grid place-items-center text-navy-600 flex-shrink-0">
-                        <Calendar size={18} />
+                  <div key={r.id} style={{ background: 'var(--c-surface)', borderRadius: 'var(--r-lg)', border: '1px solid var(--c-border)', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: 'var(--fs-md)', marginBottom: 4 }}>{artisanName}</div>
+                      <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--c-text-muted)', marginBottom: r.description_travaux ? 6 : 0 }}>
+                        <span style={{ textTransform: 'capitalize' }}>{r.artisans?.metier}</span> ·{' '}
+                        {new Date(r.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à {r.heure}
                       </div>
-                      <div>
-                        <div className="font-semibold text-sm text-navy-800">{r.titre || 'RDV'} · {artisanName}</div>
-                        <div className="text-xs text-navy-400 mt-0.5">
-                          {new Date(r.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à {r.heure}
-                          {r.artisans?.metier && <span className="ml-2 capitalize text-terra-600">· {r.artisans.metier}</span>}
-                        </div>
-                      </div>
+                      {r.description_travaux && <p style={{ fontSize: 12, color: 'var(--c-text-muted)', lineHeight: 1.4 }}>{r.description_travaux}</p>}
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${statusClass}`}>{STATUS_LABELS[r.statut || 'planifie']}</span>
-                      {r.artisans && (
-                        <Link href={`/${r.artisans.slug || ''}`} className="btn btn-ghost btn-sm no-underline">Voir profil</Link>
-                      )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+                      <Link href={`/artisan/${r.artisan_id}`} style={{ fontSize: 12, padding: '6px 14px', borderRadius: 'var(--r-sm)', border: '1px solid var(--c-border)', background: 'var(--c-surface)', cursor: 'pointer', fontFamily: 'var(--font-head)', fontWeight: 600, textDecoration: 'none', color: 'var(--c-text)' }}>
+                        Voir le profil
+                      </Link>
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: '5px 12px', borderRadius: 'var(--r-pill)', background: colors.bg, color: colors.text, fontFamily: 'var(--font-head)', whiteSpace: 'nowrap' }}>
+                        {STATUS_LABELS[r.statut]}
+                      </span>
                     </div>
                   </div>
                 )
               })}
             </div>
-          </div>
+          </section>
         )}
 
-        {/* Past interventions */}
+        {/* Past RDV */}
         {past.length > 0 && (
-          <div className="card overflow-hidden">
-            <div className="px-6 py-4 border-b border-cream-300">
-              <h2 className="font-bold text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>Historique des interventions</h2>
+          <section>
+            <h2 style={{ fontSize: 'var(--fs-xl)', fontFamily: 'var(--font-head)', fontWeight: 800, marginBottom: 20 }}>Historique</h2>
+            <div style={{ background: 'var(--c-surface)', borderRadius: 'var(--r-lg)', border: '1px solid var(--c-border)', overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: 'var(--c-bg)', borderBottom: '1px solid var(--c-border)' }}>
+                    {['Artisan', 'Métier', 'Date', 'Statut', 'Avis'].map(h => (
+                      <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 11, fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--c-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {past.map((r, i) => {
+                    const colors = STATUS_COLORS[r.statut]
+                    const artisanName = r.artisans?.entreprise || `${r.artisans?.profiles?.prenom} ${r.artisans?.profiles?.nom}`
+                    return (
+                      <tr key={r.id} style={{ borderBottom: i < past.length - 1 ? '1px solid var(--c-border)' : 'none' }}>
+                        <td style={{ padding: '14px 16px', fontSize: 'var(--fs-sm)', fontFamily: 'var(--font-head)', fontWeight: 600 }}>{artisanName}</td>
+                        <td style={{ padding: '14px 16px', fontSize: 'var(--fs-sm)', color: 'var(--c-text-muted)', textTransform: 'capitalize' }}>{r.artisans?.metier}</td>
+                        <td style={{ padding: '14px 16px', fontSize: 'var(--fs-sm)', color: 'var(--c-text-muted)' }}>
+                          {new Date(r.date).toLocaleDateString('fr-FR')} {r.heure && `à ${r.heure}`}
+                        </td>
+                        <td style={{ padding: '14px 16px' }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 'var(--r-pill)', background: colors.bg, color: colors.text, fontFamily: 'var(--font-head)' }}>
+                            {STATUS_LABELS[r.statut]}
+                          </span>
+                        </td>
+                        <td style={{ padding: '14px 16px' }}>
+                          {r.statut === 'terminee' && (
+                            <button onClick={() => openAvisModal(r)} style={{ fontSize: 12, padding: '6px 12px', border: '1px solid var(--c-border)', borderRadius: 'var(--r-sm)', background: 'var(--c-surface)', cursor: 'pointer', fontFamily: 'var(--font-head)', fontWeight: 600 }}>
+                              Laisser un avis
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
-            <table className="w-table">
-              <thead><tr><th>Artisan</th><th>Métier</th><th>Date</th><th>Avis</th></tr></thead>
-              <tbody>
-                {past.map(r => {
-                  const artisanName = r.artisans?.entreprise || `${r.artisans?.profiles?.prenom} ${r.artisans?.profiles?.nom}`
-                  return (
-                    <tr key={r.id}>
-                      <td className="font-semibold text-navy-800">{artisanName}</td>
-                      <td className="text-navy-500 capitalize">{r.artisans?.metier || '—'}</td>
-                      <td className="text-navy-400">{new Date(r.date).toLocaleDateString('fr-FR')}</td>
-                      <td>
-                        <button
-                          onClick={() => { setShowAvis(r.artisans?.id); setAvisForm({ note: 5, commentaire: '', client_nom: `${profile?.prenom} ${profile?.nom}` }) }}
-                          className="btn btn-ghost btn-sm">
-                          <Star size={13} /> Laisser un avis
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+          </section>
         )}
 
-        {rdvs.length === 0 && (
-          <div className="text-center py-20">
-            <div className="text-6xl mb-4">🔨</div>
-            <h2 className="text-2xl font-black text-navy-800 mb-3" style={{ fontFamily: 'var(--font-manrope)' }}>Trouvez votre artisan idéal</h2>
-            <p className="text-navy-500 mb-6">Des milliers d&apos;artisans certifiés près de chez vous</p>
-            <button onClick={() => document.querySelector('input')?.focus()} className="btn btn-terra btn-lg">
-              Rechercher un artisan <ArrowRight size={18} />
-            </button>
+        {reservations.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '96px 0' }}>
+            <div style={{ fontSize: 64, marginBottom: 16 }}>🔨</div>
+            <h2 style={{ fontSize: 'var(--fs-2xl)', fontFamily: 'var(--font-head)', fontWeight: 800, marginBottom: 12 }}>Aucune réservation pour l&apos;instant</h2>
+            <p style={{ color: 'var(--c-text-muted)', marginBottom: 24 }}>Trouvez un artisan de confiance près de chez vous</p>
+            <Link href="/recherche" className="btn btn-primary btn-lg">
+              Trouver un artisan
+              <svg className="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+            </Link>
           </div>
         )}
       </div>
 
-      {/* Avis modal */}
-      {showAvis && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/40" onClick={() => setShowAvis(null)} />
-          <div className="relative bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl">
-            <h2 className="font-bold text-navy-800 mb-4" style={{ fontFamily: 'var(--font-manrope)' }}>Laisser un avis</h2>
-            <div className="space-y-4">
+      {/* Avis Modal */}
+      {showAvisModal && selectedRdv && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ background: 'white', borderRadius: 'var(--r-xl)', width: '100%', maxWidth: 460 }}>
+            <div style={{ padding: '24px 28px', borderBottom: '1px solid var(--c-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ fontSize: 'var(--fs-xl)', fontFamily: 'var(--font-head)', fontWeight: 800 }}>Laisser un avis</h2>
+              <button onClick={() => setShowAvisModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 24, color: 'var(--c-text-muted)', lineHeight: 1 }}>×</button>
+            </div>
+            <div style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
               <div>
-                <label className="form-label">Votre nom</label>
-                <input className="form-input" value={avisForm.client_nom} onChange={e => setAvisForm(p => ({ ...p, client_nom: e.target.value }))} />
-              </div>
-              <div>
-                <label className="form-label">Note</label>
-                <div className="flex gap-2">
-                  {[1,2,3,4,5].map(n => (
-                    <button key={n} type="button" onClick={() => setAvisForm(p => ({ ...p, note: n }))}
-                      className={`w-10 h-10 rounded-xl border-2 text-lg transition-all ${avisForm.note >= n ? 'border-yellow-400 bg-yellow-50' : 'border-cream-300'}`}>
+                <label className="form-label" style={{ marginBottom: 10, display: 'block' }}>Note</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {[1, 2, 3, 4, 5].map(n => (
+                    <button key={n} onClick={() => setAvisForm(p => ({ ...p, note: n }))}
+                      style={{ width: 44, height: 44, borderRadius: 'var(--r-md)', border: `2px solid ${avisForm.note >= n ? 'var(--c-warning)' : 'var(--c-border)'}`, background: avisForm.note >= n ? '#FEF9C3' : 'transparent', cursor: 'pointer', fontSize: 20 }}>
                       ⭐
                     </button>
                   ))}
+                  <span style={{ alignSelf: 'center', fontSize: 'var(--fs-lg)', fontFamily: 'var(--font-head)', fontWeight: 800, marginLeft: 8 }}>{avisForm.note}/5</span>
                 </div>
               </div>
-              <div>
+              <div className="form-group">
                 <label className="form-label">Commentaire</label>
-                <textarea className="form-textarea" rows={3} value={avisForm.commentaire}
-                  onChange={e => setAvisForm(p => ({ ...p, commentaire: e.target.value }))}
-                  placeholder="Décrivez votre expérience…" />
+                <textarea className="form-input" rows={4} value={avisForm.commentaire} onChange={e => setAvisForm(p => ({ ...p, commentaire: e.target.value }))} placeholder="Décrivez votre expérience avec cet artisan…" style={{ resize: 'vertical' }} />
               </div>
-              <div className="flex gap-3 pt-2">
-                <button className="btn btn-ghost flex-1" onClick={() => setShowAvis(null)}>Annuler</button>
-                <button disabled={submitting || !avisForm.client_nom} className="btn btn-terra flex-1" onClick={() => submitAvis(showAvis)}>
-                  {submitting && <span className="spinner" />}
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                <button className="btn btn-ghost" onClick={() => setShowAvisModal(false)}>Annuler</button>
+                <button className="btn btn-primary" onClick={submitAvis} disabled={submittingAvis}>
+                  {submittingAvis ? <span className="waitlist-spinner"></span> : null}
                   Publier l&apos;avis
                 </button>
               </div>

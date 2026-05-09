@@ -1,34 +1,14 @@
 'use client'
-
-import { useCallback, useEffect, useState } from 'react'
-import dynamic from 'next/dynamic'
-import Link from 'next/link'
+import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency, calcTotals, generateNumero, TVA_RATES } from '@/lib/utils'
-import { statusBadge } from '@/components/ui/badge'
-import type { Devis, Client, LigneDocument, DevisStatut } from '@/types'
-import { FileText, Plus, X, Trash2, Eye, Download, Sparkles, Send, Save, Copy, Filter } from 'lucide-react'
+import dynamic from 'next/dynamic'
+import type { Devis, ClientArtisan } from '@/types'
 
-// Dynamic PDF imports (no SSR)
-const PDFViewer = dynamic(
-  () => import('@react-pdf/renderer').then(m => ({ default: m.PDFViewer })),
-  { ssr: false }
-)
-const PDFDownloadLink = dynamic(
-  () => import('@react-pdf/renderer').then(m => ({ default: m.PDFDownloadLink })),
-  { ssr: false }
-)
-import PDFDocument from '@/components/PDFDocument'
+const PDFDownloadLink = dynamic(() => import('@react-pdf/renderer').then(m => ({ default: m.PDFDownloadLink })), { ssr: false })
+const PDFViewer = dynamic(() => import('@react-pdf/renderer').then(m => ({ default: m.PDFViewer })), { ssr: false })
+const PDFDocument = dynamic(() => import('@/components/PDFDocument'), { ssr: false })
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-interface ArtisanInfo {
-  nom: string; prenom: string; entreprise?: string; siret?: string
-  tva?: string; adresse?: string; email?: string; phone?: string
-}
-
-const STATUTS: DevisStatut[] = ['brouillon', 'envoye', 'accepte', 'refuse', 'expire']
-
-const STATUT_LABELS: Record<DevisStatut, string> = {
+const STATUS_LABELS: Record<string, string> = {
   brouillon: 'Brouillon',
   envoye: 'Envoyé',
   accepte: 'Accepté',
@@ -36,39 +16,36 @@ const STATUT_LABELS: Record<DevisStatut, string> = {
   expire: 'Expiré',
 }
 
-const emptyLigne = (): LigneDocument => ({
-  description: '', quantite: 1, unite: '', prix_unitaire: 0, tva_pct: 20,
-})
+const STATUS_COLORS: Record<string, string> = {
+  brouillon: '#8A8675',
+  envoye: '#0B6FD4',
+  accepte: '#16A34A',
+  refuse: '#DC2626',
+  expire: '#CA8A04',
+}
 
-// ─── Component ────────────────────────────────────────────────────────────────
+const EMPTY_LIGNE = { description: '', quantite: 1, unite: '', prix_unitaire: 0, tva_pct: 20 }
+
 export default function DevisPage() {
-  const supabase = createClient()
-
-  // Data
-  const [artisanId, setArtisanId] = useState<string | null>(null)
-  const [artisanInfo, setArtisanInfo] = useState<ArtisanInfo>({ nom: '', prenom: '' })
-  const [clients, setClients] = useState<Client[]>([])
   const [devis, setDevis] = useState<Devis[]>([])
+  const [clients, setClients] = useState<ClientArtisan[]>([])
+  const [artisanInfo, setArtisanInfo] = useState<any>(null)
+  const [artisanId, setArtisanId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-
-  // UI state
   const [showCreate, setShowCreate] = useState(false)
   const [previewDevis, setPreviewDevis] = useState<Devis | null>(null)
   const [saving, setSaving] = useState(false)
-  const [filterStatut, setFilterStatut] = useState<DevisStatut | ''>('')
-  const [filterSearch, setFilterSearch] = useState('')
 
-  // Create form
   const [form, setForm] = useState({
     client_id: '',
     titre: '',
-    date_validite: '',
     notes: '',
+    date_validite: '',
+    lignes: [{ ...EMPTY_LIGNE }],
   })
-  const [lignes, setLignes] = useState<LigneDocument[]>([emptyLigne()])
 
-  // ─── Load data ─────────────────────────────────────────────────────────────
   const loadData = useCallback(async () => {
+    const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
@@ -77,587 +54,272 @@ export default function DevisPage() {
       supabase.from('artisans').select('*').eq('profile_id', user.id).single(),
     ])
 
-    if (!artisan) return
-    setArtisanId(artisan.id)
-    setArtisanInfo({
-      nom: profile?.nom || '',
-      prenom: profile?.prenom || '',
-      entreprise: artisan.entreprise,
-      siret: artisan.siret,
-      tva: artisan.tva,
-      adresse: artisan.adresse,
-      email: profile?.email,
-      phone: profile?.phone,
-    })
+    if (artisan) {
+      setArtisanId(artisan.id)
+      setArtisanInfo({
+        nom: profile?.nom || '',
+        prenom: profile?.prenom || '',
+        entreprise: artisan.entreprise,
+        siret: artisan.siret,
+        tva: artisan.tva,
+        adresse: artisan.adresse,
+        email: profile?.email,
+        phone: profile?.phone,
+      })
 
-    const [{ data: clientsData }, { data: devisData }] = await Promise.all([
-      supabase.from('clients').select('*').eq('artisan_id', artisan.id).order('nom'),
-      supabase.from('devis').select('*, clients(nom, prenom, email)').eq('artisan_id', artisan.id).order('created_at', { ascending: false }),
-    ])
-
-    setClients(clientsData || [])
-    setDevis(devisData || [])
+      const [{ data: dList }, { data: cList }] = await Promise.all([
+        supabase.from('devis').select('*').eq('artisan_id', artisan.id).order('created_at', { ascending: false }),
+        supabase.from('clients_artisan').select('*').eq('artisan_id', artisan.id).order('nom'),
+      ])
+      setDevis(dList || [])
+      setClients(cList || [])
+    }
     setLoading(false)
   }, [])
 
   useEffect(() => { loadData() }, [loadData])
 
-  // ─── KPIs ──────────────────────────────────────────────────────────────────
-  const totalDevis = devis.length
-  const enAttenteCount = devis.filter(d => d.statut === 'envoye').length
-  const caAcceptes = devis
-    .filter(d => d.statut === 'accepte')
-    .reduce((s, d) => s + d.total_ttc, 0)
-
-  // ─── Line items helpers ─────────────────────────────────────────────────────
-  const updateLigne = (i: number, field: keyof LigneDocument, value: string | number) => {
-    setLignes(prev => prev.map((l, idx) =>
-      idx === i ? { ...l, [field]: field === 'description' || field === 'unite' ? value : Number(value) } : l
-    ))
+  const calcTotals = (lignes: typeof form.lignes) => {
+    const total_ht = lignes.reduce((s, l) => s + l.quantite * l.prix_unitaire, 0)
+    const tva = lignes.reduce((s, l) => s + l.quantite * l.prix_unitaire * (l.tva_pct / 100), 0)
+    return { total_ht, tva, total_ttc: total_ht + tva }
   }
 
-  const addLigne = () => setLignes(prev => [...prev, emptyLigne()])
-  const removeLigne = (i: number) => setLignes(prev => prev.filter((_, idx) => idx !== i))
-
-  const totals = calcTotals(lignes)
-
-  // ─── Save devis ────────────────────────────────────────────────────────────
-  const handleSave = async (statut: DevisStatut) => {
+  const handleSave = async (statut: 'brouillon' | 'envoye') => {
     if (!artisanId) return
     setSaving(true)
-    try {
-      const numero = generateNumero('DEV', devis.length + 1)
-      const { data, error } = await supabase.from('devis').insert({
-        artisan_id: artisanId,
-        client_id: form.client_id || null,
-        numero,
-        titre: form.titre || null,
-        notes: form.notes || null,
-        statut,
-        lignes,
-        ...calcTotals(lignes),
-        date_emission: new Date().toISOString().split('T')[0],
-        date_validite: form.date_validite || null,
-      }).select('*, clients(nom, prenom, email)').single()
+    const supabase = createClient()
+    const { total_ht, tva, total_ttc } = calcTotals(form.lignes)
 
-      if (error) throw error
+    const count = devis.length + 1
+    const numero = `DEV-${new Date().getFullYear()}-${String(count).padStart(4, '0')}`
 
-      if (statut === 'envoye' && data) {
+    const { data, error } = await supabase.from('devis').insert({
+      artisan_id: artisanId,
+      client_id: form.client_id || null,
+      numero,
+      titre: form.titre,
+      notes: form.notes,
+      date_emission: new Date().toISOString().split('T')[0],
+      date_validite: form.date_validite || null,
+      statut,
+      lignes: form.lignes,
+      total_ht,
+      tva,
+      total_ttc,
+    }).select().single()
+
+    if (!error && data) {
+      if (statut === 'envoye' && form.client_id) {
         const client = clients.find(c => c.id === form.client_id)
         if (client?.email) {
           await fetch('/api/send-email', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              to: client.email,
-              subject: `Votre devis ${numero}`,
-              type: 'devis',
-              document: data,
-              artisanInfo,
-              client,
-            }),
+            body: JSON.stringify({ type: 'devis', clientEmail: client.email, devisId: data.id }),
           })
         }
       }
-
-      setDevis(prev => [data!, ...prev])
-      resetCreate()
-    } catch (err) {
-      console.error('Erreur sauvegarde devis:', err)
-    } finally {
-      setSaving(false)
+      setShowCreate(false)
+      setForm({ client_id: '', titre: '', notes: '', date_validite: '', lignes: [{ ...EMPTY_LIGNE }] })
+      await loadData()
     }
+    setSaving(false)
   }
 
-  const resetCreate = () => {
-    setShowCreate(false)
-    setForm({ client_id: '', titre: '', date_validite: '', notes: '' })
-    setLignes([emptyLigne()])
-  }
-
-  // ─── Status change inline ───────────────────────────────────────────────────
-  const handleStatusChange = async (id: string, statut: DevisStatut) => {
+  const handleStatusChange = async (id: string, statut: string) => {
+    const supabase = createClient()
     await supabase.from('devis').update({ statut }).eq('id', id)
-    setDevis(prev => prev.map(d => d.id === id ? { ...d, statut } : d))
+    setDevis(prev => prev.map(d => d.id === id ? { ...d, statut: statut as any } : d))
   }
 
-  // ─── Delete devis ───────────────────────────────────────────────────────────
-  const handleDelete = async (id: string) => {
-    if (!confirm('Supprimer ce devis ? Cette action est irréversible.')) return
-    const { error } = await supabase.from('devis').delete().eq('id', id)
-    if (!error) setDevis(prev => prev.filter(d => d.id !== id))
+  const updateLigne = (i: number, field: string, value: any) => {
+    setForm(prev => {
+      const lignes = [...prev.lignes]
+      lignes[i] = { ...lignes[i], [field]: value }
+      return { ...prev, lignes }
+    })
   }
 
-  // ─── Duplicate devis ────────────────────────────────────────────────────────
-  const handleDuplicate = async (d: Devis) => {
-    if (!artisanId) return
-    const numero = generateNumero('DEV', devis.length + 1)
-    const { data, error } = await supabase.from('devis').insert({
-      artisan_id: artisanId,
-      client_id: d.client_id || null,
-      numero,
-      titre: d.titre ? `Copie — ${d.titre}` : null,
-      notes: d.notes || null,
-      statut: 'brouillon' as DevisStatut,
-      lignes: d.lignes,
-      total_ht: d.total_ht,
-      tva: d.tva,
-      total_ttc: d.total_ttc,
-      date_emission: new Date().toISOString().split('T')[0],
-      date_validite: null,
-    }).select('*, clients(nom, prenom, email)').single()
-    if (!error && data) setDevis(prev => [data, ...prev])
-  }
+  const { total_ht, tva, total_ttc } = calcTotals(form.lignes)
 
-  // ─── Filtered list ──────────────────────────────────────────────────────────
-  const filteredDevis = devis.filter(d => {
-    if (filterStatut && d.statut !== filterStatut) return false
-    if (filterSearch) {
-      const q = filterSearch.toLowerCase()
-      const clientName = d.clients ? `${d.clients.prenom || ''} ${d.clients.nom}`.toLowerCase() : ''
-      return d.numero.toLowerCase().includes(q) || (d.titre || '').toLowerCase().includes(q) || clientName.includes(q)
-    }
-    return true
-  })
-
-  // ─── Render ────────────────────────────────────────────────────────────────
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="spinner w-8 h-8 border-navy-800" />
-      </div>
-    )
-  }
+  if (loading) return <div style={{ padding: 48, textAlign: 'center', color: 'var(--c-text-muted)' }}>Chargement…</div>
 
   return (
-    <div className="space-y-6">
-      {/* ── Header ── */}
-      <div className="flex items-center justify-between">
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
         <div>
-          <h1 className="text-3xl font-black text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>
-            Devis
-          </h1>
-          <p className="text-navy-400 mt-1 text-sm">Gérez vos devis et suivez leur statut</p>
+          <h1 style={{ fontSize: 'var(--fs-3xl)', fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--c-text)', marginBottom: 4 }}>Devis</h1>
+          <p style={{ color: 'var(--c-text-muted)', fontSize: 'var(--fs-sm)' }}>{devis.length} devis au total</p>
         </div>
-        <button className="btn btn-terra" onClick={() => setShowCreate(true)}>
-          <Plus size={16} />
+        <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 16, height: 16 }}><path d="M12 5v14M5 12h14"/></svg>
           Nouveau devis
         </button>
       </div>
 
-      {/* ── KPI bar ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="kpi-card">
-          <div className="w-10 h-10 bg-navy-800 rounded-xl grid place-items-center text-white mb-1">
-            <FileText size={18} />
-          </div>
-          <div className="text-2xl font-black text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>
-            {totalDevis}
-          </div>
-          <div className="text-xs font-semibold text-navy-400 uppercase tracking-wider">Total devis</div>
+      {/* Liste */}
+      {devis.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '64px 0', color: 'var(--c-text-muted)' }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ width: 48, height: 48, margin: '0 auto 16px', opacity: 0.4 }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+          <p>Aucun devis pour l&apos;instant</p>
+          <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={() => setShowCreate(true)}>Créer mon premier devis</button>
         </div>
-        <div className="kpi-card">
-          <div className="w-10 h-10 bg-blue-500 rounded-xl grid place-items-center text-white mb-1">
-            <Send size={18} />
-          </div>
-          <div className="text-2xl font-black text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>
-            {enAttenteCount}
-          </div>
-          <div className="text-xs font-semibold text-navy-400 uppercase tracking-wider">En attente de réponse</div>
-        </div>
-        <div className="kpi-card">
-          <div className="w-10 h-10 bg-terra-500 rounded-xl grid place-items-center text-white mb-1">
-            <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-              <polyline points="17 6 23 6 23 12" />
-            </svg>
-          </div>
-          <div className="text-2xl font-black text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>
-            {formatCurrency(caAcceptes)}
-          </div>
-          <div className="text-xs font-semibold text-navy-400 uppercase tracking-wider">CA devis acceptés</div>
-        </div>
-      </div>
-
-      {/* ── Filters ── */}
-      {devis.length > 0 && (
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[200px] max-w-xs">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-navy-400 pointer-events-none" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-            <input type="text" placeholder="Rechercher…" value={filterSearch} onChange={e => setFilterSearch(e.target.value)} className="form-input pl-9 py-2 text-sm" />
-          </div>
-          <select value={filterStatut} onChange={e => setFilterStatut(e.target.value as DevisStatut | '')} className="form-select py-2 text-sm w-40">
-            <option value="">Tous les statuts</option>
-            {STATUTS.map(s => <option key={s} value={s}>{STATUT_LABELS[s]}</option>)}
-          </select>
-          {(filterStatut || filterSearch) && (
-            <button onClick={() => { setFilterStatut(''); setFilterSearch('') }} className="btn btn-ghost btn-sm">
-              <X size={13} /> Effacer
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* ── Table ── */}
-      <div className="card overflow-hidden">
-        {devis.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
-            {/* Illustration SVG */}
-            <svg width="120" height="120" viewBox="0 0 120 120" fill="none" className="mb-6 opacity-30">
-              <rect x="20" y="10" width="65" height="85" rx="8" fill="#0B2440" />
-              <rect x="30" y="25" width="45" height="5" rx="2.5" fill="white" opacity=".4" />
-              <rect x="30" y="37" width="35" height="4" rx="2" fill="white" opacity=".3" />
-              <rect x="30" y="49" width="40" height="4" rx="2" fill="white" opacity=".3" />
-              <rect x="30" y="61" width="25" height="4" rx="2" fill="white" opacity=".3" />
-              <rect x="30" y="75" width="45" height="10" rx="4" fill="#DD5A2A" opacity=".7" />
-              <circle cx="88" cy="88" r="22" fill="#DD5A2A" />
-              <path d="M88 79v9m0 0v9m0-9h9m-9 0h-9" stroke="white" strokeWidth="3" strokeLinecap="round" />
-            </svg>
-            <h3 className="font-bold text-navy-700 text-lg mb-2" style={{ fontFamily: 'var(--font-manrope)' }}>
-              Aucun devis pour l&apos;instant
-            </h3>
-            <p className="text-navy-400 text-sm mb-6 max-w-xs">
-              Créez votre premier devis professionnel en quelques clics, ou laissez l&apos;IA le générer pour vous.
-            </p>
-            <div className="flex gap-3 flex-wrap justify-center">
-              <button className="btn btn-terra" onClick={() => setShowCreate(true)}>
-                <Plus size={15} /> Créer un devis
-              </button>
-              <Link href="/dashboard/artisan/ia" className="btn btn-secondary no-underline">
-                <Sparkles size={15} /> Générer avec l&apos;IA
-              </Link>
-            </div>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            {filteredDevis.length === 0 ? (
-              <div className="py-12 text-center text-navy-400 text-sm">Aucun devis ne correspond à vos filtres.</div>
-            ) : (
-            <table className="w-table">
-              <thead>
-                <tr>
-                  <th>Numéro</th>
-                  <th>Titre</th>
-                  <th>Client</th>
-                  <th>Date</th>
-                  <th className="text-right">Montant TTC</th>
-                  <th>Statut</th>
-                  <th className="text-center">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredDevis.map(d => (
-                  <tr key={d.id}>
-                    <td className="font-bold text-navy-700 whitespace-nowrap">{d.numero}</td>
-                    <td className="text-navy-600 max-w-[160px] truncate">{d.titre || '—'}</td>
-                    <td className="text-navy-600 whitespace-nowrap">
-                      {d.clients ? `${d.clients.prenom || ''} ${d.clients.nom}`.trim() : '—'}
-                    </td>
-                    <td className="text-navy-500 whitespace-nowrap">
-                      {new Date(d.date_emission).toLocaleDateString('fr-FR')}
-                    </td>
-                    <td className="text-right font-semibold text-navy-800 whitespace-nowrap">
-                      {formatCurrency(d.total_ttc)}
-                    </td>
-                    <td>
+      ) : (
+        <div style={{ background: 'var(--c-surface)', borderRadius: 'var(--r-lg)', border: '1px solid var(--c-border)', overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: 'var(--c-bg)', borderBottom: '1px solid var(--c-border)' }}>
+                {['Numéro', 'Titre', 'Client', 'Date', 'Montant TTC', 'Statut', 'Actions'].map(h => (
+                  <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 11, fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--c-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {devis.map((d, i) => {
+                const client = clients.find(c => c.id === d.client_id)
+                return (
+                  <tr key={d.id} style={{ borderBottom: i < devis.length - 1 ? '1px solid var(--c-border)' : 'none' }}>
+                    <td style={{ padding: '14px 16px', fontSize: 'var(--fs-sm)', fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--c-primary)' }}>{d.numero}</td>
+                    <td style={{ padding: '14px 16px', fontSize: 'var(--fs-sm)' }}>{d.titre || '—'}</td>
+                    <td style={{ padding: '14px 16px', fontSize: 'var(--fs-sm)', color: 'var(--c-text-muted)' }}>{client ? `${client.prenom} ${client.nom}` : '—'}</td>
+                    <td style={{ padding: '14px 16px', fontSize: 'var(--fs-sm)', color: 'var(--c-text-muted)' }}>{new Date(d.date_emission).toLocaleDateString('fr-FR')}</td>
+                    <td style={{ padding: '14px 16px', fontSize: 'var(--fs-sm)', fontFamily: 'var(--font-head)', fontWeight: 700 }}>{d.total_ttc.toFixed(2)} €</td>
+                    <td style={{ padding: '14px 16px' }}>
                       <select
                         value={d.statut}
-                        onChange={e => handleStatusChange(d.id, e.target.value as DevisStatut)}
-                        className="form-select text-xs py-1 px-2 w-32"
+                        onChange={e => handleStatusChange(d.id, e.target.value)}
+                        style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 'var(--r-sm)', border: 'none', background: `${STATUS_COLORS[d.statut]}22`, color: STATUS_COLORS[d.statut], cursor: 'pointer', fontFamily: 'var(--font-head)', outline: 'none' }}
                       >
-                        {STATUTS.map(s => (
-                          <option key={s} value={s}>{STATUT_LABELS[s]}</option>
-                        ))}
+                        {Object.entries(STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                       </select>
                     </td>
-                    <td className="text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <button className="btn btn-ghost btn-sm p-2" onClick={() => setPreviewDevis(d)} title="Aperçu PDF">
-                          <Eye size={14} />
-                        </button>
-                        <button className="btn btn-ghost btn-sm p-2" onClick={() => handleDuplicate(d)} title="Dupliquer">
-                          <Copy size={14} />
-                        </button>
-                        <button className="btn btn-ghost btn-sm p-2 text-red-400 hover:text-red-600 hover:bg-red-50" onClick={() => handleDelete(d.id)} title="Supprimer">
-                          <Trash2 size={14} />
+                    <td style={{ padding: '14px 16px' }}>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={() => setPreviewDevis(d)} style={{ fontSize: 12, padding: '6px 12px', borderRadius: 'var(--r-sm)', border: '1px solid var(--c-border)', background: 'var(--c-surface)', cursor: 'pointer', fontFamily: 'var(--font-head)', fontWeight: 600 }}>
+                          Aperçu PDF
                         </button>
                       </div>
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            )}
-          </div>
-        )}
-      </div>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-      {/* ── PDF Preview Modal ── */}
-      {previewDevis && (
-        <div className="fixed inset-0 z-50 flex flex-col" style={{ background: 'rgba(0,0,0,0.85)' }}>
-          {/* Header bar */}
-          <div
-            className="flex items-center justify-between px-6 py-3 flex-shrink-0"
-            style={{ background: '#0B2440' }}
-          >
-            <div className="flex items-center gap-3">
-              <FileText size={18} className="text-terra-400" />
-              <span className="text-white font-bold" style={{ fontFamily: 'var(--font-manrope)' }}>
-                {previewDevis.numero}
-              </span>
-              {previewDevis.titre && (
-                <span className="text-white/50 text-sm">— {previewDevis.titre}</span>
-              )}
+      {/* Create Modal */}
+      {showCreate && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '24px', overflowY: 'auto' }}>
+          <div style={{ background: 'white', borderRadius: 'var(--r-xl)', width: '100%', maxWidth: 760, marginTop: 24, marginBottom: 24 }}>
+            <div style={{ padding: '24px 28px', borderBottom: '1px solid var(--c-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ fontSize: 'var(--fs-xl)', fontFamily: 'var(--font-head)', fontWeight: 800 }}>Nouveau devis</h2>
+              <button onClick={() => setShowCreate(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 24, color: 'var(--c-text-muted)', lineHeight: 1 }}>×</button>
             </div>
-            <div className="flex items-center gap-3">
-              <PDFDownloadLink
-                document={
-                  <PDFDocument
-                    document={previewDevis}
-                    type="devis"
-                    artisanInfo={artisanInfo}
-                    client={previewDevis.clients}
-                  />
-                }
-                fileName={`${previewDevis.numero}.pdf`}
-              >
-                {({ loading: pdfLoading }) => (
-                  <button className="btn btn-terra btn-sm gap-1.5" disabled={pdfLoading}>
-                    {pdfLoading ? <div className="spinner w-3.5 h-3.5" /> : <Download size={14} />}
-                    Télécharger
-                  </button>
-                )}
-              </PDFDownloadLink>
-              <button
-                onClick={() => setPreviewDevis(null)}
-                className="w-8 h-8 rounded-lg grid place-items-center text-white/60 hover:text-white hover:bg-white/10"
-              >
-                <X size={18} />
-              </button>
-            </div>
-          </div>
+            <div style={{ padding: '24px 28px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+                <div className="form-group">
+                  <label className="form-label">Client</label>
+                  <select className="form-input" value={form.client_id} onChange={e => setForm(p => ({ ...p, client_id: e.target.value }))}>
+                    <option value="">Sans client</option>
+                    {clients.map(c => <option key={c.id} value={c.id}>{c.prenom} {c.nom}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Date de validité</label>
+                  <input type="date" className="form-input" value={form.date_validite} onChange={e => setForm(p => ({ ...p, date_validite: e.target.value }))} />
+                </div>
+              </div>
+              <div className="form-group" style={{ marginBottom: 16 }}>
+                <label className="form-label">Titre du devis</label>
+                <input type="text" className="form-input" placeholder="Ex: Rénovation salle de bain" value={form.titre} onChange={e => setForm(p => ({ ...p, titre: e.target.value }))} />
+              </div>
 
-          {/* PDF viewer */}
-          <div className="flex-1 overflow-hidden">
-            <PDFViewer style={{ width: '100%', height: '100%' }} showToolbar={false}>
-              <PDFDocument
-                document={previewDevis}
-                type="devis"
-                artisanInfo={artisanInfo}
-                client={previewDevis.clients}
-              />
-            </PDFViewer>
+              {/* Lignes */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 13, fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--c-text)', marginBottom: 12 }}>Prestations</div>
+                <div style={{ background: 'var(--c-bg)', borderRadius: 'var(--r-md)', overflow: 'hidden', border: '1px solid var(--c-border)' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 80px 80px 100px 80px 40px', gap: 0, padding: '8px 12px', background: '#f0ebe0', fontSize: 11, fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--c-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    <span>Description</span><span>Qté</span><span>Unité</span><span>Prix HT</span><span>TVA %</span><span></span>
+                  </div>
+                  {form.lignes.map((ligne, i) => (
+                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 80px 80px 100px 80px 40px', gap: 0, padding: '8px 12px', borderTop: '1px solid var(--c-border)' }}>
+                      <input value={ligne.description} onChange={e => updateLigne(i, 'description', e.target.value)} placeholder="Description" style={{ border: 'none', background: 'transparent', fontSize: 13, outline: 'none', padding: '4px 0' }} />
+                      <input type="number" value={ligne.quantite} onChange={e => updateLigne(i, 'quantite', parseFloat(e.target.value) || 0)} style={{ border: 'none', background: 'transparent', fontSize: 13, outline: 'none', padding: '4px 4px', width: '100%' }} />
+                      <input value={ligne.unite} onChange={e => updateLigne(i, 'unite', e.target.value)} placeholder="h / m²" style={{ border: 'none', background: 'transparent', fontSize: 13, outline: 'none', padding: '4px 4px' }} />
+                      <input type="number" value={ligne.prix_unitaire} onChange={e => updateLigne(i, 'prix_unitaire', parseFloat(e.target.value) || 0)} style={{ border: 'none', background: 'transparent', fontSize: 13, outline: 'none', padding: '4px 4px', width: '100%' }} />
+                      <select value={ligne.tva_pct} onChange={e => updateLigne(i, 'tva_pct', parseFloat(e.target.value))} style={{ border: 'none', background: 'transparent', fontSize: 13, outline: 'none', padding: '4px 2px' }}>
+                        <option value={0}>0%</option>
+                        <option value={5.5}>5.5%</option>
+                        <option value={10}>10%</option>
+                        <option value={20}>20%</option>
+                      </select>
+                      <button onClick={() => setForm(p => ({ ...p, lignes: p.lignes.filter((_, j) => j !== i) }))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--c-text-muted)', fontSize: 18, lineHeight: 1 }} disabled={form.lignes.length === 1}>×</button>
+                    </div>
+                  ))}
+                  <div style={{ padding: '8px 12px', borderTop: '1px solid var(--c-border)' }}>
+                    <button onClick={() => setForm(p => ({ ...p, lignes: [...p.lignes, { ...EMPTY_LIGNE }] }))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--c-accent)', fontSize: 13, fontFamily: 'var(--font-head)', fontWeight: 600, padding: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 14, height: 14 }}><path d="M12 5v14M5 12h14"/></svg>
+                      Ajouter une ligne
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Totaux */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+                <div style={{ minWidth: 240 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 13, color: 'var(--c-text-muted)' }}>
+                    <span>Total HT</span><span style={{ fontWeight: 600, color: 'var(--c-text)' }}>{total_ht.toFixed(2)} €</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 13, color: 'var(--c-text-muted)', borderBottom: '1px solid var(--c-border)' }}>
+                    <span>TVA</span><span style={{ fontWeight: 600, color: 'var(--c-text)' }}>{tva.toFixed(2)} €</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0 0', fontSize: 16, fontFamily: 'var(--font-head)', fontWeight: 800 }}>
+                    <span>Total TTC</span><span>{total_ttc.toFixed(2)} €</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 24 }}>
+                <label className="form-label">Notes</label>
+                <textarea className="form-input" rows={3} placeholder="Conditions particulières, modalités de paiement…" value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} style={{ resize: 'vertical' }} />
+              </div>
+
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                <button className="btn btn-ghost" onClick={() => setShowCreate(false)}>Annuler</button>
+                <button className="btn btn-secondary" onClick={() => handleSave('brouillon')} disabled={saving}>Sauvegarder en brouillon</button>
+                <button className="btn btn-primary" onClick={() => handleSave('envoye')} disabled={saving}>
+                  {saving ? <span className="waitlist-spinner"></span> : null}
+                  Envoyer au client
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
-      {/* ── Create Modal ── */}
-      {showCreate && (
-        <div className="fixed inset-0 z-40 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.6)' }}>
-          <div className="min-h-full flex items-start justify-center p-4 pt-10 pb-16">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl">
-              {/* Modal header */}
-              <div className="flex items-center justify-between px-6 py-5 border-b border-cream-300">
-                <h2 className="text-xl font-black text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>
-                  Nouveau devis
-                </h2>
-                <div className="flex items-center gap-3">
-                  <Link
-                    href="/dashboard/artisan/ia"
-                    className="btn btn-terra btn-sm gap-1.5 no-underline"
-                    onClick={resetCreate}
-                  >
-                    <Sparkles size={14} />
-                    Générer avec l&apos;IA
-                  </Link>
-                  <button
-                    onClick={resetCreate}
-                    className="w-8 h-8 rounded-lg grid place-items-center text-navy-400 hover:text-navy-700 hover:bg-cream-200"
-                  >
-                    <X size={18} />
+      {/* PDF Preview Modal */}
+      {previewDevis && artisanInfo && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 24px', background: '#0B2440', color: 'white' }}>
+            <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>{previewDevis.numero}</span>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <PDFDownloadLink document={<PDFDocument document={previewDevis} type="devis" artisanInfo={artisanInfo} client={clients.find(c => c.id === previewDevis.client_id)} />} fileName={`${previewDevis.numero}.pdf`}>
+                {({ loading: l }) => (
+                  <button style={{ padding: '8px 16px', background: 'var(--c-accent)', color: 'white', border: 'none', borderRadius: 'var(--r-md)', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-head)', fontWeight: 700 }}>
+                    {l ? 'Génération…' : 'Télécharger PDF'}
                   </button>
-                </div>
-              </div>
-
-              <div className="p-6 space-y-6">
-                {/* Row 1: client + titre + date */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div>
-                    <label className="form-label">Client</label>
-                    <select
-                      className="form-select"
-                      value={form.client_id}
-                      onChange={e => setForm(f => ({ ...f, client_id: e.target.value }))}
-                    >
-                      <option value="">Sans client</option>
-                      {clients.map(c => (
-                        <option key={c.id} value={c.id}>
-                          {c.prenom ? `${c.prenom} ${c.nom}` : c.nom}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="form-label">Titre du devis</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      placeholder="Ex. Rénovation cuisine…"
-                      value={form.titre}
-                      onChange={e => setForm(f => ({ ...f, titre: e.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="form-label">Valable jusqu&apos;au</label>
-                    <input
-                      type="date"
-                      className="form-input"
-                      value={form.date_validite}
-                      onChange={e => setForm(f => ({ ...f, date_validite: e.target.value }))}
-                    />
-                  </div>
-                </div>
-
-                {/* Line items */}
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <label className="form-label mb-0">Prestations</label>
-                  </div>
-                  <div className="rounded-xl border border-cream-300 overflow-hidden">
-                    {/* Table header */}
-                    <div className="hidden sm:grid grid-cols-[1fr_80px_80px_110px_90px_40px] gap-2 px-4 py-2.5 bg-cream-200 text-xs font-bold text-navy-400 uppercase tracking-wider">
-                      <span>Description</span>
-                      <span>Qté</span>
-                      <span>Unité</span>
-                      <span>Prix HT</span>
-                      <span>TVA %</span>
-                      <span />
-                    </div>
-
-                    {lignes.map((ligne, i) => (
-                      <div
-                        key={i}
-                        className="grid grid-cols-1 sm:grid-cols-[1fr_80px_80px_110px_90px_40px] gap-2 px-4 py-3 border-t border-cream-300 first:border-t-0"
-                      >
-                        <input
-                          type="text"
-                          className="form-input"
-                          placeholder="Description de la prestation"
-                          value={ligne.description}
-                          onChange={e => updateLigne(i, 'description', e.target.value)}
-                        />
-                        <input
-                          type="number"
-                          className="form-input"
-                          placeholder="1"
-                          min={0}
-                          step="0.01"
-                          value={ligne.quantite}
-                          onChange={e => updateLigne(i, 'quantite', e.target.value)}
-                        />
-                        <input
-                          type="text"
-                          className="form-input"
-                          placeholder="m², h…"
-                          value={ligne.unite || ''}
-                          onChange={e => updateLigne(i, 'unite', e.target.value)}
-                        />
-                        <input
-                          type="number"
-                          className="form-input"
-                          placeholder="0.00"
-                          min={0}
-                          step="0.01"
-                          value={ligne.prix_unitaire}
-                          onChange={e => updateLigne(i, 'prix_unitaire', e.target.value)}
-                        />
-                        <select
-                          className="form-select"
-                          value={ligne.tva_pct}
-                          onChange={e => updateLigne(i, 'tva_pct', e.target.value)}
-                        >
-                          {TVA_RATES.map(r => (
-                            <option key={r} value={r}>{r} %</option>
-                          ))}
-                        </select>
-                        <button
-                          className="btn btn-ghost btn-sm p-2 text-red-400 hover:text-red-600 hover:bg-red-50 justify-self-end"
-                          onClick={() => removeLigne(i)}
-                          disabled={lignes.length === 1}
-                          title="Supprimer"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-
-                  <button className="btn btn-ghost btn-sm mt-3 gap-1.5" onClick={addLigne}>
-                    <Plus size={14} />
-                    Ajouter une ligne
-                  </button>
-                </div>
-
-                {/* Totals + Notes side by side */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-start">
-                  {/* Notes */}
-                  <div>
-                    <label className="form-label">Notes / conditions</label>
-                    <textarea
-                      className="form-textarea"
-                      placeholder="Conditions particulières, délais, informations complémentaires…"
-                      rows={4}
-                      value={form.notes}
-                      onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-                    />
-                  </div>
-
-                  {/* Live totals */}
-                  <div className="bg-cream-200/60 rounded-2xl p-5 space-y-2.5">
-                    <div className="flex justify-between text-sm text-navy-600">
-                      <span>Total HT</span>
-                      <span className="font-semibold">{formatCurrency(totals.total_ht)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm text-navy-600">
-                      <span>TVA</span>
-                      <span className="font-semibold">{formatCurrency(totals.tva)}</span>
-                    </div>
-                    <div className="h-px bg-cream-400" />
-                    <div className="flex justify-between">
-                      <span className="font-bold text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>
-                        Total TTC
-                      </span>
-                      <span className="text-xl font-black text-navy-800" style={{ fontFamily: 'var(--font-manrope)' }}>
-                        {formatCurrency(totals.total_ttc)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="flex items-center justify-end gap-3 pt-2 border-t border-cream-300">
-                  <button className="btn btn-ghost" onClick={resetCreate} disabled={saving}>
-                    Annuler
-                  </button>
-                  <button
-                    className="btn btn-secondary gap-1.5"
-                    onClick={() => handleSave('brouillon')}
-                    disabled={saving}
-                  >
-                    {saving ? <div className="spinner w-3.5 h-3.5" /> : <Save size={14} />}
-                    Sauvegarder brouillon
-                  </button>
-                  <button
-                    className="btn btn-terra gap-1.5"
-                    onClick={() => handleSave('envoye')}
-                    disabled={saving}
-                  >
-                    {saving ? <div className="spinner w-3.5 h-3.5" /> : <Send size={14} />}
-                    Envoyer au client
-                  </button>
-                </div>
-              </div>
+                )}
+              </PDFDownloadLink>
+              <button onClick={() => setPreviewDevis(null)} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', cursor: 'pointer', color: 'white', fontSize: 24, lineHeight: 1, borderRadius: 'var(--r-sm)', padding: '4px 10px' }}>×</button>
             </div>
+          </div>
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            <PDFViewer style={{ width: '100%', height: '100%' }}>
+              <PDFDocument document={previewDevis} type="devis" artisanInfo={artisanInfo} client={clients.find(c => c.id === previewDevis.client_id)} />
+            </PDFViewer>
           </div>
         </div>
       )}
