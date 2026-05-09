@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { Reservation, Devis } from '@/types'
+import type { Agenda, Devis } from '@/types'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 
@@ -16,7 +16,7 @@ interface KPIData {
 
 export default function ArtisanDashboardPage() {
   const [kpis, setKpis] = useState<KPIData>({ ca_mois: 0, devis_en_attente: 0, rdv_semaine: 0, clients_total: 0, ca_prev: 0 })
-  const [reservations, setReservations] = useState<Reservation[]>([])
+  const [reservations, setReservations] = useState<Agenda[]>([])
   const [recentDevis, setRecentDevis] = useState<Devis[]>([])
   const [loading, setLoading] = useState(true)
   const [artisanId, setArtisanId] = useState<string | null>(null)
@@ -47,8 +47,8 @@ export default function ArtisanDashboardPage() {
         supabase.from('factures').select('total_ttc').eq('artisan_id', artisan.id).eq('statut', 'payee').gte('date_emission', firstDay),
         supabase.from('factures').select('total_ttc').eq('artisan_id', artisan.id).eq('statut', 'payee').gte('date_emission', prevFirst).lte('date_emission', prevLast),
         supabase.from('devis').select('*', { count: 'exact', head: true }).eq('artisan_id', artisan.id).eq('statut', 'envoye'),
-        supabase.from('reservations').select('*', { count: 'exact', head: true }).eq('artisan_id', artisan.id).gte('date', weekStart.toISOString().split('T')[0]).lte('date', weekEnd.toISOString().split('T')[0]),
-        supabase.from('clients_artisan').select('*', { count: 'exact', head: true }).eq('artisan_id', artisan.id),
+        supabase.from('agenda').select('*', { count: 'exact', head: true }).eq('artisan_id', artisan.id).gte('date', weekStart.toISOString().split('T')[0]).lte('date', weekEnd.toISOString().split('T')[0]),
+        supabase.from('clients').select('*', { count: 'exact', head: true }).eq('artisan_id', artisan.id),
       ])
 
       const ca = (factures.data || []).reduce((s, f) => s + (f.total_ttc || 0), 0)
@@ -56,8 +56,8 @@ export default function ArtisanDashboardPage() {
       setKpis({ ca_mois: ca, ca_prev: caPrev, devis_en_attente: devisAttente.count || 0, rdv_semaine: rdvWeek.count || 0, clients_total: clients.count || 0 })
 
       const [{ data: rdvs }, { data: dvs }] = await Promise.all([
-        supabase.from('reservations').select('*, profiles(prenom, nom)').eq('artisan_id', artisan.id).gte('date', now.toISOString().split('T')[0]).order('date').order('heure').limit(5),
-        supabase.from('devis').select('*, clients_artisan(nom, prenom)').eq('artisan_id', artisan.id).order('created_at', { ascending: false }).limit(4),
+        supabase.from('agenda').select('*, clients(prenom, nom)').eq('artisan_id', artisan.id).gte('date', now.toISOString().split('T')[0]).order('date').order('heure').limit(5),
+        supabase.from('devis').select('*, clients(nom, prenom)').eq('artisan_id', artisan.id).order('created_at', { ascending: false }).limit(4),
       ])
       setReservations(rdvs || [])
       setRecentDevis(dvs || [])
@@ -164,10 +164,10 @@ export default function ArtisanDashboardPage() {
                   <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--c-text)', fontSize: 'var(--fs-md)', letterSpacing: '-0.02em' }}>{r.heure}</div>
                   <small style={{ display: 'block', fontSize: 11, color: 'var(--c-text-muted)', fontWeight: 500 }}>{format(new Date(r.date), 'dd MMM', { locale: fr })}</small>
                 </div>
-                <div style={{ width: 4, background: r.statut === 'en_attente' ? 'var(--c-accent)' : 'var(--c-primary)', borderRadius: 2, height: 44 }}></div>
+                <div style={{ width: 4, background: r.statut === 'planifie' ? 'var(--c-accent)' : 'var(--c-primary)', borderRadius: 2, height: 44 }}></div>
                 <div>
-                  <strong style={{ display: 'block', fontFamily: 'var(--font-head)', fontSize: 'var(--fs-md)' }}>{r.profiles?.prenom} {r.profiles?.nom}</strong>
-                  <span style={{ color: 'var(--c-text-soft)', fontSize: 'var(--fs-sm)' }}>{r.description_travaux || 'Prestation'}</span>
+                  <strong style={{ display: 'block', fontFamily: 'var(--font-head)', fontSize: 'var(--fs-md)' }}>{r.clients?.prenom} {r.clients?.nom}</strong>
+                  <span style={{ color: 'var(--c-text-soft)', fontSize: 'var(--fs-sm)' }}>{r.titre || r.notes || 'Prestation'}</span>
                   <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                     <span className={`status-badge ${r.statut}`}>{r.statut.replace('_', ' ')}</span>
                   </div>
@@ -205,7 +205,7 @@ export default function ArtisanDashboardPage() {
                   {recentDevis.map(d => (
                     <tr key={d.id} style={{ borderTop: '1px solid var(--c-border)', fontSize: 'var(--fs-sm)' }}>
                       <td style={{ padding: '12px 0', fontFamily: 'var(--font-head)', fontWeight: 600 }}>{d.numero}</td>
-                      <td style={{ padding: '12px 0', color: 'var(--c-text-soft)' }}>{d.clients_artisan?.prenom} {d.clients_artisan?.nom}</td>
+                      <td style={{ padding: '12px 0', color: 'var(--c-text-soft)' }}>{d.clients?.prenom} {d.clients?.nom}</td>
                       <td style={{ padding: '12px 0' }}><span className={`status-badge ${d.statut}`}>{d.statut}</span></td>
                       <td style={{ padding: '12px 0', textAlign: 'right', fontFamily: 'var(--font-head)', fontWeight: 700 }}>{d.total_ttc.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</td>
                     </tr>
