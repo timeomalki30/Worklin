@@ -47,6 +47,19 @@ export interface Client {
   created_at: string
 }
 
+// Alias — the CRM clients table is named "clients" in Worklin (previously "clients_artisan")
+export type ClientArtisan = Client
+
+export interface Disponibilite {
+  id: string
+  artisan_id: string
+  date: string
+  heure_debut: string
+  heure_fin: string
+  disponible?: boolean
+  created_at?: string
+}
+
 export interface LigneDocument {
   description: string
   quantite: number
@@ -147,7 +160,7 @@ export interface Demande {
   email?: string
   phone?: string
   description: string
-  statut?: 'nouveau' | 'en_cours' | 'traite' | 'refuse'
+  statut?: 'nouveau' | 'en_cours' | 'traite' | 'refuse' | 'contacte' | 'converti'
   source?: string
   created_at: string
 }

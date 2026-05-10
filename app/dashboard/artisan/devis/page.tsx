@@ -80,7 +80,7 @@ export default function DevisPage() {
 
       const [{ data: dList }, { data: cList }] = await Promise.all([
         supabase.from('devis').select('*').eq('artisan_id', artisan.id).order('created_at', { ascending: false }),
-        supabase.from('clients_artisan').select('*').eq('artisan_id', artisan.id).order('nom'),
+        supabase.from('clients').select('*').eq('artisan_id', artisan.id).order('nom'),
       ])
       setDevis(dList || [])
       setClients(cList || [])

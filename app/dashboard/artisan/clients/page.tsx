@@ -22,7 +22,7 @@ export default function ClientsPage() {
     const { data: artisan } = await supabase.from('artisans').select('id').eq('profile_id', user.id).single()
     if (artisan) {
       setArtisanId(artisan.id)
-      const { data } = await supabase.from('clients_artisan').select('*').eq('artisan_id', artisan.id).order('nom')
+      const { data } = await supabase.from('clients').select('*').eq('artisan_id', artisan.id).order('nom')
       setClients(data || [])
     }
     setLoading(false)
@@ -40,9 +40,9 @@ export default function ClientsPage() {
     setSaving(true)
     const supabase = createClient()
     if (editClient) {
-      await supabase.from('clients_artisan').update(form).eq('id', editClient.id)
+      await supabase.from('clients').update(form).eq('id', editClient.id)
     } else {
-      await supabase.from('clients_artisan').insert({ ...form, artisan_id: artisanId })
+      await supabase.from('clients').insert({ ...form, artisan_id: artisanId })
     }
     setShowCreate(false)
     setEditClient(null)
@@ -54,7 +54,7 @@ export default function ClientsPage() {
   const handleDelete = async (id: string) => {
     if (!confirm('Supprimer ce client ?')) return
     const supabase = createClient()
-    await supabase.from('clients_artisan').delete().eq('id', id)
+    await supabase.from('clients').delete().eq('id', id)
     setClients(prev => prev.filter(c => c.id !== id))
   }
 

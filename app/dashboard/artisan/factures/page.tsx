@@ -72,7 +72,7 @@ export default function FacturesPage() {
       const [{ data: fList }, { data: dList }, { data: cList }] = await Promise.all([
         supabase.from('factures').select('*').eq('artisan_id', artisan.id).order('created_at', { ascending: false }),
         supabase.from('devis').select('*').eq('artisan_id', artisan.id).eq('statut', 'accepte'),
-        supabase.from('clients_artisan').select('*').eq('artisan_id', artisan.id).order('nom'),
+        supabase.from('clients').select('*').eq('artisan_id', artisan.id).order('nom'),
       ])
       setFactures(fList || [])
       setDevis(dList || [])
