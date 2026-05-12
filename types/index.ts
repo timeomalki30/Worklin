@@ -57,6 +57,7 @@ export interface Disponibilite {
   heure_debut: string
   heure_fin: string
   disponible?: boolean
+  type_absence?: string // 'conges' | 'vacances' | 'arret_maladie' | 'autre'
   created_at?: string
 }
 
