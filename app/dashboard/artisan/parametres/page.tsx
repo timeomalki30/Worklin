@@ -62,6 +62,7 @@ export default function ParametresPage() {
   const [loading, setLoading]     = useState(true)
   const [saving, setSaving]       = useState(false)
   const [saved, setSaved]         = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [userId, setUserId]       = useState<string | null>(null)
   const [artisanId, setArtisanId] = useState<string | null>(null)
 
@@ -114,24 +115,34 @@ export default function ParametresPage() {
   const handleSave = async () => {
     if (!userId || !artisanId) return
     setSaving(true)
-    const supabase = createClient()
-    await Promise.all([
-      supabase.from('profiles').update({
-        prenom: profileForm.prenom, nom: profileForm.nom, phone: profileForm.phone,
-      }).eq('id', userId),
-      supabase.from('artisans').update({
-        metier: artisanForm.metier, entreprise: artisanForm.entreprise,
-        siret: artisanForm.siret, tva: artisanForm.tva, adresse: artisanForm.adresse,
-        ville: artisanForm.ville, description: artisanForm.description,
-        tarif_horaire: artisanForm.tarif_horaire ? parseFloat(artisanForm.tarif_horaire) : null,
-        forme_juridique: artisanForm.forme_juridique || null,
-        certifications: artisanForm.certifications,
-        horaires_defaut: horairesDefaut,
-      }).eq('id', artisanId),
-    ])
-    setSaving(false)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 3000)
+    setSaveError(null)
+    try {
+      const supabase = createClient()
+      const [profileRes, artisanRes] = await Promise.all([
+        supabase.from('profiles').update({
+          prenom: profileForm.prenom, nom: profileForm.nom, phone: profileForm.phone,
+        }).eq('id', userId),
+        supabase.from('artisans').update({
+          metier: artisanForm.metier, entreprise: artisanForm.entreprise,
+          siret: artisanForm.siret, tva: artisanForm.tva, adresse: artisanForm.adresse,
+          ville: artisanForm.ville, description: artisanForm.description,
+          tarif_horaire: artisanForm.tarif_horaire ? parseFloat(artisanForm.tarif_horaire) : null,
+          certifications: artisanForm.certifications,
+          horaires_defaut: horairesDefaut,
+        }).eq('id', artisanId),
+      ])
+      const err = profileRes.error || artisanRes.error
+      if (err) {
+        setSaveError(err.message)
+      } else {
+        setSaved(true)
+        setTimeout(() => setSaved(false), 3000)
+      }
+    } catch (e: any) {
+      setSaveError(e?.message ?? 'Erreur inattendue')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const toggleCertif = (name: string) => {
@@ -257,7 +268,7 @@ export default function ParametresPage() {
           {JOURS_SEMAINE.map(({ key, label }) => {
             const h: HoraireDay = horairesDefaut[key] ?? DEFAULT_HORAIRES[key] ?? { actif: false, debut: '08:00', fin: '18:00' }
             return (
-              <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '10px 16px', borderRadius: 'var(--r-md)', border: `1.5px solid ${h.actif ? 'var(--c-success)' : 'var(--c-border)'}`, background: h.actif ? 'var(--c-success-soft)' : 'var(--c-surface)', transition: 'all 0.15s', flexWrap: 'wrap', gap: 12 }}>
+              <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderRadius: 'var(--r-md)', border: `1.5px solid ${h.actif ? 'var(--c-success)' : 'var(--c-border)'}`, background: h.actif ? 'var(--c-success-soft)' : 'var(--c-surface)', transition: 'all 0.15s', flexWrap: 'wrap' }}>
                 {/* Toggle + label */}
                 <button
                   type="button"
@@ -304,6 +315,12 @@ export default function ParametresPage() {
       </section>
 
       {/* ── Save ────────────────────────────────────────────────────────────── */}
+      {saveError && (
+        <div style={{ marginBottom: 16, padding: '12px 16px', background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 'var(--r-md)', fontSize: 13, color: '#991B1B', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16, flexShrink: 0, marginTop: 1 }}><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+          <span><strong>Erreur lors de la sauvegarde :</strong> {saveError}</span>
+        </div>
+      )}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, alignItems: 'center' }}>
         {saved && (
           <span style={{ fontSize: 13, color: 'var(--c-success)', fontFamily: 'var(--font-head)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>

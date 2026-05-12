@@ -656,13 +656,16 @@ export default function AgendaPage() {
           </div>
 
           {/* Preview: number of days that will be created */}
-          {dispoForm.date_debut && dispoForm.date_fin && dispoForm.jours.length > 0 && (
-            <div style={{ fontSize: 13, color: '#166534', fontWeight: 600 }}>
+          {dispoForm.date_debut && dispoForm.date_fin && (
+            <div style={{ fontSize: 13, fontWeight: 600 }}>
               {(() => {
+                if (dispoForm.date_fin < dispoForm.date_debut) {
+                  return <span style={{ color: '#DC2626' }}>→ La date de fin doit être après la date de début</span>
+                }
                 const n = getDatesInRange(dispoForm.date_debut, dispoForm.date_fin, dispoForm.jours).length
                 return n > 0
-                  ? `→ ${n} jour${n > 1 ? 's' : ''} de disponibilité seront créés`
-                  : '→ Aucun jour correspondant dans cette plage'
+                  ? <span style={{ color: '#166534' }}>→ {n} jour{n > 1 ? 's' : ''} de disponibilité seront créés</span>
+                  : <span style={{ color: '#DC2626' }}>→ Aucun jour correspondant (vérifiez les jours cochés)</span>
               })()}
             </div>
           )}
@@ -670,7 +673,14 @@ export default function AgendaPage() {
           <ModalFooter
             onCancel={() => setShowDispoModal(false)}
             onConfirm={handleAddDispo}
-            disabled={saving || !dispoForm.date_debut || !dispoForm.date_fin || dispoForm.jours.length === 0}
+            disabled={
+              saving ||
+              !dispoForm.date_debut ||
+              !dispoForm.date_fin ||
+              dispoForm.date_fin < dispoForm.date_debut ||
+              dispoForm.jours.length === 0 ||
+              getDatesInRange(dispoForm.date_debut, dispoForm.date_fin, dispoForm.jours).length === 0
+            }
             saving={saving}
             label="Enregistrer"
           />
@@ -721,12 +731,15 @@ export default function AgendaPage() {
 
           {/* Preview */}
           {absenceForm.date_debut && absenceForm.date_fin && (
-            <div style={{ fontSize: 13, color: '#991B1B', fontWeight: 600 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>
               {(() => {
+                if (absenceForm.date_fin < absenceForm.date_debut) {
+                  return <span style={{ color: '#DC2626' }}>→ La date de fin doit être après la date de début</span>
+                }
                 const n = getDatesInRange(absenceForm.date_debut, absenceForm.date_fin, null).length
                 return n > 0
-                  ? `→ ${n} jour${n > 1 ? 's' : ''} seront bloqués`
-                  : '→ Plage invalide'
+                  ? <span style={{ color: '#991B1B' }}>→ {n} jour{n > 1 ? 's' : ''} seront bloqués</span>
+                  : <span style={{ color: '#DC2626' }}>→ Plage invalide</span>
               })()}
             </div>
           )}
@@ -734,7 +747,13 @@ export default function AgendaPage() {
           <ModalFooter
             onCancel={() => setShowAbsenceModal(false)}
             onConfirm={handleAddAbsence}
-            disabled={saving || !absenceForm.date_debut || !absenceForm.date_fin}
+            disabled={
+              saving ||
+              !absenceForm.date_debut ||
+              !absenceForm.date_fin ||
+              absenceForm.date_fin < absenceForm.date_debut ||
+              getDatesInRange(absenceForm.date_debut, absenceForm.date_fin, null).length === 0
+            }
             saving={saving}
             label="Bloquer cette période"
             danger
