@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { Agenda, Disponibilite } from '@/types'
+import type { Agenda, Disponibilite, HoraireDay } from '@/types'
 
 const DAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
 const MONTHS = [
@@ -30,6 +30,54 @@ const ABSENCE_LABELS: Record<string, string> = {
   autre:          'Indisponible',
 }
 
+// JS getDay() (0=Sun) → our horaires_defaut keys
+const JS_DAY_TO_KEY: Record<number, string> = {
+  0: 'dim', 1: 'lun', 2: 'mar', 3: 'mer', 4: 'jeu', 5: 'ven', 6: 'sam',
+}
+
+// JOURS_SEMAINE ordered Mon–Sun (matching DAYS array)
+const JOURS_SEMAINE = [
+  { key: 'lun', label: 'Lun' },
+  { key: 'mar', label: 'Mar' },
+  { key: 'mer', label: 'Mer' },
+  { key: 'jeu', label: 'Jeu' },
+  { key: 'ven', label: 'Ven' },
+  { key: 'sam', label: 'Sam' },
+  { key: 'dim', label: 'Dim' },
+]
+
+const DEFAULT_HORAIRES: Record<string, HoraireDay> = {
+  lun: { actif: true,  debut: '08:00', fin: '18:00' },
+  mar: { actif: true,  debut: '08:00', fin: '18:00' },
+  mer: { actif: true,  debut: '08:00', fin: '18:00' },
+  jeu: { actif: true,  debut: '08:00', fin: '18:00' },
+  ven: { actif: true,  debut: '08:00', fin: '18:00' },
+  sam: { actif: false, debut: '09:00', fin: '12:00' },
+  dim: { actif: false, debut: '09:00', fin: '12:00' },
+}
+
+// Returns array of 'YYYY-MM-DD' strings for every date in [start, end] whose
+// day-of-week key is in dayFilter (or all days when dayFilter is null)
+function getDatesInRange(start: string, end: string, dayFilter: string[] | null = null): string[] {
+  const result: string[] = []
+  if (!start || !end) return result
+  const [sy, sm, sd] = start.split('-').map(Number)
+  const [ey, em, ed] = end.split('-').map(Number)
+  const cur  = new Date(sy, sm - 1, sd)
+  const last = new Date(ey, em - 1, ed)
+  while (cur <= last) {
+    const key = JS_DAY_TO_KEY[cur.getDay()]
+    if (!dayFilter || dayFilter.includes(key)) {
+      const y = cur.getFullYear()
+      const m = String(cur.getMonth() + 1).padStart(2, '0')
+      const d = String(cur.getDate()).padStart(2, '0')
+      result.push(`${y}-${m}-${d}`)
+    }
+    cur.setDate(cur.getDate() + 1)
+  }
+  return result
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 function absenceLabel(type?: string) {
   return ABSENCE_LABELS[type || 'autre'] ?? 'Indisponible'
@@ -37,15 +85,16 @@ function absenceLabel(type?: string) {
 
 // ─── main component ───────────────────────────────────────────────────────────
 export default function AgendaPage() {
-  const [artisanId, setArtisanId]     = useState<string | null>(null)
-  const [rdvs, setRdvs]               = useState<Agenda[]>([])
-  const [dispos, setDispos]           = useState<Disponibilite[]>([])
-  const [clients, setClients]         = useState<{ id: string; nom: string; prenom?: string }[]>([])
-  const [loading, setLoading]         = useState(true)
-  const [saving, setSaving]           = useState(false)
-  const [deletingId, setDeletingId]   = useState<string | null>(null)
-  const [currentDate, setCurrentDate] = useState(new Date())
-  const [tab, setTab]                 = useState<'rdv' | 'dispos'>('rdv')
+  const [artisanId, setArtisanId]         = useState<string | null>(null)
+  const [rdvs, setRdvs]                   = useState<Agenda[]>([])
+  const [dispos, setDispos]               = useState<Disponibilite[]>([])
+  const [clients, setClients]             = useState<{ id: string; nom: string; prenom?: string }[]>([])
+  const [horairesDefaut, setHorairesDefaut] = useState<Record<string, HoraireDay>>(DEFAULT_HORAIRES)
+  const [loading, setLoading]             = useState(true)
+  const [saving, setSaving]               = useState(false)
+  const [deletingId, setDeletingId]       = useState<string | null>(null)
+  const [currentDate, setCurrentDate]     = useState(new Date())
+  const [tab, setTab]                     = useState<'rdv' | 'dispos'>('rdv')
 
   // — modals
   const [showRdvModal,     setShowRdvModal]     = useState(false)
@@ -59,12 +108,18 @@ export default function AgendaPage() {
     titre: '', date: '', heure: '09:00', notes: '',
     type: 'rdv' as 'rdv' | 'chantier' | 'autre', client_id: '',
   })
-  const [dispoForm, setDispoForm] = useState({
-    date: '', heure_debut: '08:00', heure_fin: '18:00',
+
+  // Dispo form — date range + day-of-week selection
+  const activeKeys = Object.entries(DEFAULT_HORAIRES)
+    .filter(([, v]) => v.actif)
+    .map(([k]) => k)
+  const [dispoForm, setDispoForm] = useState<{ date_debut: string; date_fin: string; jours: string[] }>({
+    date_debut: '', date_fin: '', jours: activeKeys,
   })
+
+  // Absence form — date range + type + note
   const [absenceForm, setAbsenceForm] = useState({
-    date: '', heure_debut: '00:00', heure_fin: '23:59',
-    type_absence: 'conges' as string,
+    date_debut: '', date_fin: '', type_absence: 'conges' as string, note: '',
   })
 
   // ── load ──────────────────────────────────────────────────────────────────
@@ -73,9 +128,20 @@ export default function AgendaPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     const { data: artisan } = await supabase
-      .from('artisans').select('id').eq('profile_id', user.id).single()
+      .from('artisans').select('id, horaires_defaut').eq('profile_id', user.id).single()
     if (!artisan) { setLoading(false); return }
     setArtisanId(artisan.id)
+
+    // Merge saved horaires with defaults
+    if (artisan.horaires_defaut) {
+      const merged = { ...DEFAULT_HORAIRES, ...artisan.horaires_defaut }
+      setHorairesDefaut(merged)
+      // Pre-populate dispo form with active days from saved horaires
+      const savedActiveKeys = Object.entries(merged)
+        .filter(([, v]) => v.actif)
+        .map(([k]) => k)
+      setDispoForm(p => ({ ...p, jours: savedActiveKeys }))
+    }
 
     const [{ data: agendaData }, { data: dList }, { data: clientList }] = await Promise.all([
       supabase.from('agenda')
@@ -139,50 +205,80 @@ export default function AgendaPage() {
   }
 
   // ── Dispo actions (via service-role API to bypass RLS) ────────────────────
-  const insertDispo = async (payload: object): Promise<Disponibilite | null> => {
+  const batchInsertDispos = async (rows: object[]): Promise<Disponibilite[] | null> => {
     const res = await fetch('/api/disponibilites', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(rows),
     })
     const json = await res.json()
     if (!res.ok || json.error) {
       alert('Erreur : ' + (json.error ?? res.statusText))
       return null
     }
-    return json as Disponibilite
+    return Array.isArray(json) ? json : [json]
   }
 
   const handleAddDispo = async () => {
-    if (!artisanId || !dispoForm.date) return
+    if (!artisanId || !dispoForm.date_debut || !dispoForm.date_fin || dispoForm.jours.length === 0) return
     setSaving(true)
-    const row = await insertDispo({
-      artisan_id:  artisanId,
-      date:        dispoForm.date,
-      heure_debut: dispoForm.heure_debut,
-      heure_fin:   dispoForm.heure_fin,
-      disponible:  true,
+
+    const dates = getDatesInRange(dispoForm.date_debut, dispoForm.date_fin, dispoForm.jours)
+    if (dates.length === 0) {
+      alert('Aucun jour correspondant dans la plage sélectionnée.')
+      setSaving(false)
+      return
+    }
+
+    const rows = dates.map(date => {
+      const dayKey = JS_DAY_TO_KEY[new Date(date + 'T00:00:00').getDay()]
+      const h = horairesDefaut[dayKey] ?? { debut: '08:00', fin: '18:00' }
+      return {
+        artisan_id:  artisanId,
+        date,
+        heure_debut: h.debut,
+        heure_fin:   h.fin,
+        disponible:  true,
+      }
     })
-    if (row) setDispos(prev => [...prev, row].sort((a, b) => a.date.localeCompare(b.date)))
+
+    const inserted = await batchInsertDispos(rows)
+    if (inserted) {
+      setDispos(prev => [...prev, ...inserted].sort((a, b) => a.date.localeCompare(b.date)))
+    }
     setShowDispoModal(false)
-    setDispoForm({ date: '', heure_debut: '08:00', heure_fin: '18:00' })
+    const savedActiveKeys = Object.entries(horairesDefaut).filter(([, v]) => v.actif).map(([k]) => k)
+    setDispoForm({ date_debut: '', date_fin: '', jours: savedActiveKeys })
     setSaving(false)
   }
 
   const handleAddAbsence = async () => {
-    if (!artisanId || !absenceForm.date) return
+    if (!artisanId || !absenceForm.date_debut || !absenceForm.date_fin) return
     setSaving(true)
-    const row = await insertDispo({
+
+    const dates = getDatesInRange(absenceForm.date_debut, absenceForm.date_fin, null)
+    if (dates.length === 0) {
+      alert('Plage de dates invalide.')
+      setSaving(false)
+      return
+    }
+
+    const rows = dates.map(date => ({
       artisan_id:   artisanId,
-      date:         absenceForm.date,
-      heure_debut:  absenceForm.heure_debut,
-      heure_fin:    absenceForm.heure_fin,
+      date,
+      heure_debut:  '00:00',
+      heure_fin:    '23:59',
       disponible:   false,
       type_absence: absenceForm.type_absence,
-    })
-    if (row) setDispos(prev => [...prev, row].sort((a, b) => a.date.localeCompare(b.date)))
+      ...(absenceForm.note ? { note: absenceForm.note } : {}),
+    }))
+
+    const inserted = await batchInsertDispos(rows)
+    if (inserted) {
+      setDispos(prev => [...prev, ...inserted].sort((a, b) => a.date.localeCompare(b.date)))
+    }
     setShowAbsenceModal(false)
-    setAbsenceForm({ date: '', heure_debut: '00:00', heure_fin: '23:59', type_absence: 'conges' })
+    setAbsenceForm({ date_debut: '', date_fin: '', type_absence: 'conges', note: '' })
     setSaving(false)
   }
 
@@ -228,6 +324,14 @@ export default function AgendaPage() {
   // split for the dispos tab
   const futureDispos = dispos.filter(d => d.disponible !== false && d.date >= todayStr)
   const allAbsences  = dispos.filter(d => d.disponible === false)
+
+  // toggle a day-of-week in the dispo form
+  const toggleJour = (key: string) => {
+    setDispoForm(p => ({
+      ...p,
+      jours: p.jours.includes(key) ? p.jours.filter(k => k !== key) : [...p.jours, key],
+    }))
+  }
 
   if (loading) return <div style={{ padding: 48, textAlign: 'center', color: 'var(--c-text-muted)' }}>Chargement…</div>
 
@@ -304,11 +408,10 @@ export default function AgendaPage() {
                   const isToday    = dateStr === todayStr
 
                   let cellBg = 'transparent'
-                  if (isToday)        cellBg = 'var(--c-accent)'
+                  if (isToday)         cellBg = 'var(--c-accent)'
                   else if (hasAbsence) cellBg = '#FEE2E2'
                   else if (hasDispo)   cellBg = '#DCFCE7'
 
-                  // If a day has an absence, show the type label tiny
                   const absenceType = slots.find(s => s.disponible === false)?.type_absence
 
                   return (
@@ -491,45 +594,112 @@ export default function AgendaPage() {
         </Modal>
       )}
 
-      {/* Add disponibilité */}
+      {/* Add disponibilité — date range + day checkboxes */}
       {showDispoModal && (
-        <Modal title="Ajouter une disponibilité" onClose={() => setShowDispoModal(false)}>
-          <div style={{ background: '#F0FDF4', border: '1px solid #86EFAC', borderRadius: 'var(--r-md)', padding: '10px 14px', fontSize: 13, color: '#166534', marginBottom: 4 }}>
+        <Modal title="Ajouter des disponibilités" onClose={() => setShowDispoModal(false)}>
+          <div style={{ background: '#F0FDF4', border: '1px solid #86EFAC', borderRadius: 'var(--r-md)', padding: '10px 14px', fontSize: 13, color: '#166534' }}>
             🟢 Plage où vous êtes disponible pour des interventions
           </div>
-          <div className="form-group">
-            <label className="form-label">Date *</label>
-            <input type="date" className="form-input" value={dispoForm.date} min={todayStr}
-              onChange={e => setDispoForm(p => ({ ...p, date: e.target.value }))} />
-          </div>
+
+          {/* Date range */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <div className="form-group">
-              <label className="form-label">Heure de début</label>
-              <input type="time" className="form-input" value={dispoForm.heure_debut}
-                onChange={e => setDispoForm(p => ({ ...p, heure_debut: e.target.value }))} />
+              <label className="form-label">Date de début *</label>
+              <input type="date" className="form-input" value={dispoForm.date_debut} min={todayStr}
+                onChange={e => setDispoForm(p => ({ ...p, date_debut: e.target.value }))} />
             </div>
             <div className="form-group">
-              <label className="form-label">Heure de fin</label>
-              <input type="time" className="form-input" value={dispoForm.heure_fin}
-                onChange={e => setDispoForm(p => ({ ...p, heure_fin: e.target.value }))} />
+              <label className="form-label">Date de fin *</label>
+              <input type="date" className="form-input" value={dispoForm.date_fin}
+                min={dispoForm.date_debut || todayStr}
+                onChange={e => setDispoForm(p => ({ ...p, date_fin: e.target.value }))} />
             </div>
           </div>
-          <ModalFooter onCancel={() => setShowDispoModal(false)} onConfirm={handleAddDispo}
-            disabled={saving || !dispoForm.date} saving={saving} label="Enregistrer" />
+
+          {/* Day-of-week checkboxes */}
+          <div className="form-group">
+            <label className="form-label" style={{ marginBottom: 10 }}>Jours de la semaine</label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {JOURS_SEMAINE.map(({ key, label }) => {
+                const checked = dispoForm.jours.includes(key)
+                const h = horairesDefaut[key]
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => toggleJour(key)}
+                    title={h?.actif ? `${h.debut} — ${h.fin}` : 'Inactif dans vos horaires'}
+                    style={{
+                      padding: '7px 14px',
+                      borderRadius: 'var(--r-pill)',
+                      border: `2px solid ${checked ? 'var(--c-accent)' : 'var(--c-border)'}`,
+                      background: checked ? 'var(--c-accent)' : 'var(--c-surface)',
+                      color: checked ? 'white' : 'var(--c-text-muted)',
+                      fontSize: 13,
+                      fontFamily: 'var(--font-head)',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Info about default hours */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 12px', background: 'var(--c-bg)', borderRadius: 'var(--r-md)', fontSize: 12, color: 'var(--c-text-muted)' }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14, flexShrink: 0, marginTop: 1 }}><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+            <span>Les horaires par défaut sont définis dans vos <strong>Paramètres</strong>. Chaque jour utilisera ses heures configurées.</span>
+          </div>
+
+          {/* Preview: number of days that will be created */}
+          {dispoForm.date_debut && dispoForm.date_fin && dispoForm.jours.length > 0 && (
+            <div style={{ fontSize: 13, color: '#166534', fontWeight: 600 }}>
+              {(() => {
+                const n = getDatesInRange(dispoForm.date_debut, dispoForm.date_fin, dispoForm.jours).length
+                return n > 0
+                  ? `→ ${n} jour${n > 1 ? 's' : ''} de disponibilité seront créés`
+                  : '→ Aucun jour correspondant dans cette plage'
+              })()}
+            </div>
+          )}
+
+          <ModalFooter
+            onCancel={() => setShowDispoModal(false)}
+            onConfirm={handleAddDispo}
+            disabled={saving || !dispoForm.date_debut || !dispoForm.date_fin || dispoForm.jours.length === 0}
+            saving={saving}
+            label="Enregistrer"
+          />
         </Modal>
       )}
 
-      {/* Add indisponibilité */}
+      {/* Add indisponibilité — date range + type + note */}
       {showAbsenceModal && (
-        <Modal title="Ajouter une indisponibilité" onClose={() => setShowAbsenceModal(false)}>
-          <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 'var(--r-md)', padding: '10px 14px', fontSize: 13, color: '#991B1B', marginBottom: 4 }}>
-            🔴 Congé, arrêt maladie ou toute journée non disponible — visible en rouge sur le calendrier
+        <Modal title="Bloquer une période" onClose={() => setShowAbsenceModal(false)}>
+          <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: 'var(--r-md)', padding: '10px 14px', fontSize: 13, color: '#991B1B' }}>
+            🔴 Congé, arrêt maladie ou toute période non disponible — apparaîtra en rouge sur le calendrier
           </div>
-          <div className="form-group">
-            <label className="form-label">Date *</label>
-            <input type="date" className="form-input" value={absenceForm.date}
-              onChange={e => setAbsenceForm(p => ({ ...p, date: e.target.value }))} />
+
+          {/* Date range */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div className="form-group">
+              <label className="form-label">Date de début *</label>
+              <input type="date" className="form-input" value={absenceForm.date_debut}
+                onChange={e => setAbsenceForm(p => ({ ...p, date_debut: e.target.value }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Date de fin *</label>
+              <input type="date" className="form-input" value={absenceForm.date_fin}
+                min={absenceForm.date_debut}
+                onChange={e => setAbsenceForm(p => ({ ...p, date_fin: e.target.value }))} />
+            </div>
           </div>
+
+          {/* Type */}
           <div className="form-group">
             <label className="form-label">Type d&apos;absence</label>
             <select className="form-input" value={absenceForm.type_absence}
@@ -540,24 +710,35 @@ export default function AgendaPage() {
               <option value="autre">Autre / Indisponible</option>
             </select>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <div className="form-group">
-              <label className="form-label">Heure début</label>
-              <input type="time" className="form-input" value={absenceForm.heure_debut}
-                onChange={e => setAbsenceForm(p => ({ ...p, heure_debut: e.target.value }))} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Heure fin</label>
-              <input type="time" className="form-input" value={absenceForm.heure_fin}
-                onChange={e => setAbsenceForm(p => ({ ...p, heure_fin: e.target.value }))} />
-            </div>
+
+          {/* Note optionnelle */}
+          <div className="form-group">
+            <label className="form-label">Note (optionnelle)</label>
+            <textarea className="form-input" rows={2} placeholder="Précisions, motif…"
+              value={absenceForm.note} onChange={e => setAbsenceForm(p => ({ ...p, note: e.target.value }))}
+              style={{ resize: 'vertical' }} />
           </div>
-          <p style={{ fontSize: 12, color: 'var(--c-text-muted)' }}>
-            Par défaut 00:00 → 23:59 = journée entière bloquée.
-          </p>
-          <ModalFooter onCancel={() => setShowAbsenceModal(false)} onConfirm={handleAddAbsence}
-            disabled={saving || !absenceForm.date} saving={saving}
-            label="Bloquer cette journée" danger />
+
+          {/* Preview */}
+          {absenceForm.date_debut && absenceForm.date_fin && (
+            <div style={{ fontSize: 13, color: '#991B1B', fontWeight: 600 }}>
+              {(() => {
+                const n = getDatesInRange(absenceForm.date_debut, absenceForm.date_fin, null).length
+                return n > 0
+                  ? `→ ${n} jour${n > 1 ? 's' : ''} seront bloqués`
+                  : '→ Plage invalide'
+              })()}
+            </div>
+          )}
+
+          <ModalFooter
+            onCancel={() => setShowAbsenceModal(false)}
+            onConfirm={handleAddAbsence}
+            disabled={saving || !absenceForm.date_debut || !absenceForm.date_fin}
+            saving={saving}
+            label="Bloquer cette période"
+            danger
+          />
         </Modal>
       )}
     </div>
@@ -569,12 +750,12 @@ export default function AgendaPage() {
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-      <div style={{ background: 'white', borderRadius: 'var(--r-xl)', width: '100%', maxWidth: 480 }}>
+      <div style={{ background: 'white', borderRadius: 'var(--r-xl)', width: '100%', maxWidth: 500 }}>
         <div style={{ padding: '22px 28px', borderBottom: '1px solid var(--c-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2 style={{ fontSize: 'var(--fs-xl)', fontFamily: 'var(--font-head)', fontWeight: 800 }}>{title}</h2>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 24, color: 'var(--c-text-muted)', lineHeight: 1 }}>×</button>
         </div>
-        <div style={{ padding: '22px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ padding: '22px 28px', display: 'flex', flexDirection: 'column', gap: 14, maxHeight: 'calc(100vh - 160px)', overflowY: 'auto' }}>
           {children}
         </div>
       </div>
@@ -648,7 +829,7 @@ function AbsenceTable({ rows, deletingId, onDelete }: {
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr style={{ background: 'var(--c-bg)', borderBottom: '1px solid var(--c-border)' }}>
-            {['Date', 'Horaires', 'Type', ''].map(h => (
+            {['Date', 'Type', 'Note', ''].map(h => (
               <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 11, fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--c-text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{h}</th>
             ))}
           </tr>
@@ -659,13 +840,13 @@ function AbsenceTable({ rows, deletingId, onDelete }: {
               <td style={{ padding: '14px 16px', fontSize: 'var(--fs-sm)', fontFamily: 'var(--font-head)', fontWeight: 600 }}>
                 {new Date(d.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
               </td>
-              <td style={{ padding: '14px 16px', fontSize: 'var(--fs-sm)', color: 'var(--c-text-muted)' }}>
-                {d.heure_debut === '00:00' && d.heure_fin === '23:59' ? 'Journée entière' : `${d.heure_debut} — ${d.heure_fin}`}
-              </td>
               <td style={{ padding: '14px 16px' }}>
                 <span style={{ background: '#FEE2E2', color: '#DC2626', padding: '3px 10px', borderRadius: 'var(--r-pill)', fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-head)' }}>
                   {ABSENCE_LABELS[d.type_absence ?? 'autre'] ?? 'Indisponible'}
                 </span>
+              </td>
+              <td style={{ padding: '14px 16px', fontSize: 12, color: 'var(--c-text-muted)' }}>
+                {d.note ?? '—'}
               </td>
               <td style={{ padding: '14px 16px', textAlign: 'right' }}>
                 <TrashBtn id={d.id} deletingId={deletingId} onDelete={onDelete} />

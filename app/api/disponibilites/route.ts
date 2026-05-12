@@ -7,39 +7,59 @@ const admin = createClient(
   { auth: { autoRefreshToken: false, persistSession: false } }
 )
 
-// POST — insert a disponibilité or indisponibilité
+type DispoPayload = {
+  artisan_id: string
+  date: string
+  heure_debut?: string
+  heure_fin?: string
+  disponible?: boolean
+  type_absence?: string
+  note?: string
+}
+
+// POST — insert one or many dispo/indispo rows (service role bypasses RLS)
 export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const { artisan_id, date, heure_debut, heure_fin, disponible, type_absence } = body
 
-    if (!artisan_id || !date) {
-      return NextResponse.json({ error: 'artisan_id and date are required' }, { status: 400 })
+    // Accept both a single object and an array
+    const rows: DispoPayload[] = Array.isArray(body) ? body : [body]
+
+    if (rows.length === 0) {
+      return NextResponse.json({ error: 'No rows to insert' }, { status: 400 })
     }
 
-    const payload: Record<string, unknown> = {
-      artisan_id,
-      date,
-      heure_debut: heure_debut ?? '08:00',
-      heure_fin: heure_fin ?? '18:00',
-      disponible: disponible ?? true,
+    // Basic validation
+    for (const row of rows) {
+      if (!row.artisan_id || !row.date) {
+        return NextResponse.json({ error: 'Each row must have artisan_id and date' }, { status: 400 })
+      }
     }
-    if (type_absence) payload.type_absence = type_absence
+
+    // Normalise optional fields
+    const clean = rows.map(r => ({
+      artisan_id:  r.artisan_id,
+      date:        r.date,
+      heure_debut: r.heure_debut  ?? '08:00',
+      heure_fin:   r.heure_fin    ?? '18:00',
+      disponible:  r.disponible   ?? true,
+      ...(r.type_absence ? { type_absence: r.type_absence } : {}),
+      ...(r.note         ? { note: r.note }                 : {}),
+    }))
 
     const { data, error } = await admin
       .from('disponibilites')
-      .insert(payload)
+      .insert(clean)
       .select()
-      .single()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-    return NextResponse.json(data)
+    return NextResponse.json(data) // returns array
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })
   }
 }
 
-// DELETE — remove a slot by id
+// DELETE — remove a single slot by id
 export async function DELETE(req: Request) {
   try {
     const { id } = await req.json()

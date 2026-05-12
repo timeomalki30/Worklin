@@ -2,8 +2,29 @@
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { AlertTriangle, CheckCircle } from 'lucide-react'
+import type { HoraireDay } from '@/types'
 
 const CERTIFS = ['RGE', 'Qualibat', 'QualiPAC', 'QualiSol', 'Handibat', 'Eco-artisan', 'Qualifelec', 'Décennale']
+
+const JOURS_SEMAINE: { key: string; label: string }[] = [
+  { key: 'lun', label: 'Lundi'    },
+  { key: 'mar', label: 'Mardi'    },
+  { key: 'mer', label: 'Mercredi' },
+  { key: 'jeu', label: 'Jeudi'    },
+  { key: 'ven', label: 'Vendredi' },
+  { key: 'sam', label: 'Samedi'   },
+  { key: 'dim', label: 'Dimanche' },
+]
+
+export const DEFAULT_HORAIRES: Record<string, HoraireDay> = {
+  lun: { actif: true,  debut: '08:00', fin: '18:00' },
+  mar: { actif: true,  debut: '08:00', fin: '18:00' },
+  mer: { actif: true,  debut: '08:00', fin: '18:00' },
+  jeu: { actif: true,  debut: '08:00', fin: '18:00' },
+  ven: { actif: true,  debut: '08:00', fin: '18:00' },
+  sam: { actif: false, debut: '09:00', fin: '12:00' },
+  dim: { actif: false, debut: '09:00', fin: '12:00' },
+}
 
 type CertifEntry = { active: boolean; expires_at: string }
 
@@ -19,29 +40,29 @@ function certifBadge(entry: CertifEntry) {
   const today = new Date()
   const exp = new Date(entry.expires_at)
   const daysLeft = Math.ceil((exp.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
-  if (daysLeft <= 0) return { label: 'Expirée', color: '#DC2626', bg: '#fef2f2' }
+  if (daysLeft <= 0)  return { label: 'Expirée',               color: '#DC2626', bg: '#fef2f2' }
   if (daysLeft <= 30) return { label: `Expire dans ${daysLeft}j`, color: '#CA8A04', bg: '#fffbeb' }
   return null
 }
 
 const FORMES = [
-  { value: '', label: '— Sélectionner —' },
+  { value: '',     label: '— Sélectionner —' },
   { value: 'auto', label: 'Auto-entrepreneur / Micro-entreprise' },
-  { value: 'EI', label: 'EI — Entreprise individuelle' },
+  { value: 'EI',   label: 'EI — Entreprise individuelle' },
   { value: 'EIRL', label: 'EIRL' },
   { value: 'EURL', label: 'EURL' },
   { value: 'SARL', label: 'SARL' },
-  { value: 'SAS', label: 'SAS' },
+  { value: 'SAS',  label: 'SAS'  },
   { value: 'SASU', label: 'SASU' },
-  { value: 'SNC', label: 'SNC' },
-  { value: 'SA', label: 'SA' },
+  { value: 'SNC',  label: 'SNC'  },
+  { value: 'SA',   label: 'SA'   },
 ]
 
 export default function ParametresPage() {
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const [userId, setUserId] = useState<string | null>(null)
+  const [loading, setLoading]     = useState(true)
+  const [saving, setSaving]       = useState(false)
+  const [saved, setSaved]         = useState(false)
+  const [userId, setUserId]       = useState<string | null>(null)
   const [artisanId, setArtisanId] = useState<string | null>(null)
 
   const [profileForm, setProfileForm] = useState({ prenom: '', nom: '', email: '', phone: '' })
@@ -50,9 +71,12 @@ export default function ParametresPage() {
     description: '', tarif_horaire: '', forme_juridique: '',
     certifications: {} as Record<string, any>,
   })
+  const [horairesDefaut, setHorairesDefaut] = useState<Record<string, HoraireDay>>({ ...DEFAULT_HORAIRES })
 
   const sp = (k: string, v: string) => setProfileForm(p => ({ ...p, [k]: v }))
-  const sa = (k: string, v: any) => setArtisanForm(p => ({ ...p, [k]: v }))
+  const sa = (k: string, v: any)    => setArtisanForm(p => ({ ...p, [k]: v }))
+  const sh = (key: string, field: keyof HoraireDay, value: any) =>
+    setHorairesDefaut(p => ({ ...p, [key]: { ...p[key], [field]: value } }))
 
   const loadData = useCallback(async () => {
     const supabase = createClient()
@@ -78,6 +102,9 @@ export default function ParametresPage() {
         forme_juridique: artisan.forme_juridique || '',
         certifications: artisan.certifications || {},
       })
+      if (artisan.horaires_defaut) {
+        setHorairesDefaut({ ...DEFAULT_HORAIRES, ...artisan.horaires_defaut })
+      }
     }
     setLoading(false)
   }, [])
@@ -89,14 +116,17 @@ export default function ParametresPage() {
     setSaving(true)
     const supabase = createClient()
     await Promise.all([
-      supabase.from('profiles').update({ prenom: profileForm.prenom, nom: profileForm.nom, phone: profileForm.phone }).eq('id', userId),
+      supabase.from('profiles').update({
+        prenom: profileForm.prenom, nom: profileForm.nom, phone: profileForm.phone,
+      }).eq('id', userId),
       supabase.from('artisans').update({
-        metier: artisanForm.metier, entreprise: artisanForm.entreprise, siret: artisanForm.siret,
-        tva: artisanForm.tva, adresse: artisanForm.adresse, ville: artisanForm.ville,
-        description: artisanForm.description,
+        metier: artisanForm.metier, entreprise: artisanForm.entreprise,
+        siret: artisanForm.siret, tva: artisanForm.tva, adresse: artisanForm.adresse,
+        ville: artisanForm.ville, description: artisanForm.description,
         tarif_horaire: artisanForm.tarif_horaire ? parseFloat(artisanForm.tarif_horaire) : null,
         forme_juridique: artisanForm.forme_juridique || null,
         certifications: artisanForm.certifications,
+        horaires_defaut: horairesDefaut,
       }).eq('id', artisanId),
     ])
     setSaving(false)
@@ -125,9 +155,9 @@ export default function ParametresPage() {
         <p style={{ color: 'var(--c-text-muted)', fontSize: 'var(--fs-sm)' }}>Gérez votre profil et vos informations professionnelles</p>
       </div>
 
-      {/* Section compte */}
-      <section style={{ background: 'var(--c-surface)', borderRadius: 'var(--r-lg)', border: '1px solid var(--c-border)', padding: '24px 28px', marginBottom: 24 }}>
-        <h2 style={{ fontSize: 'var(--fs-lg)', fontFamily: 'var(--font-head)', fontWeight: 800, marginBottom: 20, paddingBottom: 16, borderBottom: '1px solid var(--c-border)' }}>Informations personnelles</h2>
+      {/* ── Infos personnelles ──────────────────────────────────────────────── */}
+      <section style={sectionStyle}>
+        <SectionTitle>Informations personnelles</SectionTitle>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
           <div className="form-group"><label className="form-label">Prénom</label><input className="form-input" value={profileForm.prenom} onChange={e => sp('prenom', e.target.value)} /></div>
           <div className="form-group"><label className="form-label">Nom</label><input className="form-input" value={profileForm.nom} onChange={e => sp('nom', e.target.value)} /></div>
@@ -142,9 +172,9 @@ export default function ParametresPage() {
         </div>
       </section>
 
-      {/* Section entreprise */}
-      <section style={{ background: 'var(--c-surface)', borderRadius: 'var(--r-lg)', border: '1px solid var(--c-border)', padding: '24px 28px', marginBottom: 24 }}>
-        <h2 style={{ fontSize: 'var(--fs-lg)', fontFamily: 'var(--font-head)', fontWeight: 800, marginBottom: 20, paddingBottom: 16, borderBottom: '1px solid var(--c-border)' }}>Informations professionnelles</h2>
+      {/* ── Infos professionnelles ──────────────────────────────────────────── */}
+      <section style={sectionStyle}>
+        <SectionTitle>Informations professionnelles</SectionTitle>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
           <div className="form-group"><label className="form-label">Métier</label><input className="form-input" value={artisanForm.metier} onChange={e => sa('metier', e.target.value)} placeholder="Plombier, Électricien…" /></div>
           <div className="form-group"><label className="form-label">Nom d&apos;entreprise</label><input className="form-input" value={artisanForm.entreprise} onChange={e => sa('entreprise', e.target.value)} placeholder="SARL Dupont Plomberie" /></div>
@@ -177,8 +207,8 @@ export default function ParametresPage() {
         </div>
       </section>
 
-      {/* Certifications */}
-      <section style={{ background: 'var(--c-surface)', borderRadius: 'var(--r-lg)', border: '1px solid var(--c-border)', padding: '24px 28px', marginBottom: 32 }}>
+      {/* ── Certifications ──────────────────────────────────────────────────── */}
+      <section style={sectionStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingBottom: 16, borderBottom: '1px solid var(--c-border)' }}>
           <h2 style={{ fontSize: 'var(--fs-lg)', fontFamily: 'var(--font-head)', fontWeight: 800 }}>Certifications &amp; Labels</h2>
           {alertCount > 0 && (
@@ -217,7 +247,63 @@ export default function ParametresPage() {
         </div>
       </section>
 
-      {/* Save */}
+      {/* ── Horaires de travail ─────────────────────────────────────────────── */}
+      <section style={sectionStyle}>
+        <SectionTitle>Horaires de travail par défaut</SectionTitle>
+        <p style={{ fontSize: 'var(--fs-sm)', color: 'var(--c-text-muted)', marginBottom: 20 }}>
+          Ces horaires sont utilisés automatiquement lors de la création de disponibilités sur l&apos;agenda.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {JOURS_SEMAINE.map(({ key, label }) => {
+            const h: HoraireDay = horairesDefaut[key] ?? DEFAULT_HORAIRES[key] ?? { actif: false, debut: '08:00', fin: '18:00' }
+            return (
+              <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '10px 16px', borderRadius: 'var(--r-md)', border: `1.5px solid ${h.actif ? 'var(--c-success)' : 'var(--c-border)'}`, background: h.actif ? 'var(--c-success-soft)' : 'var(--c-surface)', transition: 'all 0.15s', flexWrap: 'wrap', gap: 12 }}>
+                {/* Toggle + label */}
+                <button
+                  type="button"
+                  onClick={() => sh(key, 'actif', !h.actif)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'none', border: 'none', cursor: 'pointer', padding: 0, minWidth: 120 }}
+                >
+                  <span style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${h.actif ? 'var(--c-success)' : 'var(--c-border)'}`, background: h.actif ? 'var(--c-success)' : 'transparent', display: 'grid', placeItems: 'center', flexShrink: 0, transition: 'all 0.15s' }}>
+                    {h.actif && <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" style={{ width: 11, height: 11 }}><path d="M5 13l4 4L19 7"/></svg>}
+                  </span>
+                  <span style={{ fontSize: 13, fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--c-text)', width: 82 }}>{label}</span>
+                </button>
+
+                {h.actif ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="time"
+                      value={h.debut}
+                      onChange={e => sh(key, 'debut', e.target.value)}
+                      style={{ fontSize: 13, padding: '5px 10px', border: '1px solid var(--c-border)', borderRadius: 'var(--r-sm)', background: 'white', outline: 'none', cursor: 'pointer' }}
+                    />
+                    <span style={{ fontSize: 13, color: 'var(--c-text-muted)', fontWeight: 600 }}>→</span>
+                    <input
+                      type="time"
+                      value={h.fin}
+                      onChange={e => sh(key, 'fin', e.target.value)}
+                      style={{ fontSize: 13, padding: '5px 10px', border: '1px solid var(--c-border)', borderRadius: 'var(--r-sm)', background: 'white', outline: 'none', cursor: 'pointer' }}
+                    />
+                    <span style={{ fontSize: 12, color: '#15803D', fontFamily: 'var(--font-head)', fontWeight: 600, marginLeft: 4 }}>
+                      {(() => {
+                        const [sh2, sm2] = h.debut.split(':').map(Number)
+                        const [eh, em] = h.fin.split(':').map(Number)
+                        const mins = eh * 60 + em - sh2 * 60 - sm2
+                        return mins > 0 ? `${Math.floor(mins / 60)}h${mins % 60 > 0 ? String(mins % 60).padStart(2, '0') : ''}` : ''
+                      })()}
+                    </span>
+                  </div>
+                ) : (
+                  <span style={{ fontSize: 12, color: 'var(--c-text-muted)', fontStyle: 'italic' }}>Jour non travaillé</span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* ── Save ────────────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, alignItems: 'center' }}>
         {saved && (
           <span style={{ fontSize: 13, color: 'var(--c-success)', fontFamily: 'var(--font-head)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -230,5 +316,22 @@ export default function ParametresPage() {
         </button>
       </div>
     </div>
+  )
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+const sectionStyle: React.CSSProperties = {
+  background: 'var(--c-surface)',
+  borderRadius: 'var(--r-lg)',
+  border: '1px solid var(--c-border)',
+  padding: '24px 28px',
+  marginBottom: 24,
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 style={{ fontSize: 'var(--fs-lg)', fontFamily: 'var(--font-head)', fontWeight: 800, marginBottom: 20, paddingBottom: 16, borderBottom: '1px solid var(--c-border)' }}>
+      {children}
+    </h2>
   )
 }

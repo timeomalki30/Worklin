@@ -11,6 +11,12 @@ export interface Profile {
   created_at: string
 }
 
+export interface HoraireDay {
+  actif: boolean
+  debut: string
+  fin: string
+}
+
 export interface Artisan {
   id: string
   profile_id: string
@@ -26,6 +32,7 @@ export interface Artisan {
   note_moyenne?: number
   nb_avis?: number
   certifications?: Record<string, any>
+  horaires_defaut?: Record<string, HoraireDay>
   plan?: 'free' | 'pro' | 'business'
   actif?: boolean
   photo_url?: string
@@ -58,6 +65,7 @@ export interface Disponibilite {
   heure_fin: string
   disponible?: boolean
   type_absence?: string // 'conges' | 'vacances' | 'arret_maladie' | 'autre'
+  note?: string
   created_at?: string
 }
 
