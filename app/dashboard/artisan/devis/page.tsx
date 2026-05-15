@@ -1,5 +1,6 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import dynamic from 'next/dynamic'
 import type { Devis, DevisStatut } from '@/types'
@@ -40,7 +41,8 @@ N'hésitez pas à me contacter si vous avez des questions ou si vous souhaitez m
 Cordialement,`
 }
 
-export default function DevisPage() {
+function DevisContent() {
+  const searchParams = useSearchParams()
   const [devis, setDevis] = useState<Devis[]>([])
   const [clients, setClients] = useState<ClientArtisan[]>([])
   const [artisanInfo, setArtisanInfo] = useState<any>(null)
@@ -49,6 +51,7 @@ export default function DevisPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [previewDevis, setPreviewDevis] = useState<Devis | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   // Relance modal
   const [relanceDevis, setRelanceDevis] = useState<Devis | null>(null)
@@ -88,6 +91,20 @@ export default function DevisPage() {
     setLoading(false)
   }, [])
 
+  // Open create modal pre-filled when coming from vitrine "Créer devis"
+  useEffect(() => {
+    const nom = searchParams.get('prefill_nom')
+    const desc = searchParams.get('prefill_desc')
+    if (nom || desc) {
+      setForm(prev => ({
+        ...prev,
+        titre: desc || '',
+        notes: nom ? `Demande de : ${nom}` : '',
+      }))
+      setShowCreate(true)
+    }
+  }, [searchParams])
+
   useEffect(() => { loadData() }, [loadData])
 
   const calcTotals = (lignes: typeof form.lignes) => {
@@ -99,32 +116,39 @@ export default function DevisPage() {
   const handleSave = async (statut: 'brouillon' | 'envoye') => {
     if (!artisanId) return
     setSaving(true)
-    const supabase = createClient()
-    const { total_ht, tva, total_ttc } = calcTotals(form.lignes)
-    const count = devis.length + 1
-    const numero = `DEV-${new Date().getFullYear()}-${String(count).padStart(4, '0')}`
+    setSaveError(null)
+    try {
+      const supabase = createClient()
+      const { total_ht, tva, total_ttc } = calcTotals(form.lignes)
+      const count = devis.length + 1
+      const numero = `DEV-${new Date().getFullYear()}-${String(count).padStart(4, '0')}`
 
-    const { data, error } = await supabase.from('devis').insert({
-      artisan_id: artisanId, client_id: form.client_id || null,
-      numero, titre: form.titre, notes: form.notes,
-      date_emission: new Date().toISOString().split('T')[0],
-      date_validite: form.date_validite || null, statut, lignes: form.lignes,
-      total_ht, tva, total_ttc,
-    }).select().single()
+      const { data, error } = await supabase.from('devis').insert({
+        artisan_id: artisanId, client_id: form.client_id || null,
+        numero, titre: form.titre, notes: form.notes,
+        date_emission: new Date().toISOString().split('T')[0],
+        date_validite: form.date_validite || null, statut, lignes: form.lignes,
+        total_ht, tva, total_ttc,
+      }).select().single()
 
-    if (!error && data) {
-      if (statut === 'envoye' && form.client_id) {
-        const client = clients.find(c => c.id === form.client_id)
-        if (client?.email) {
-          await fetch('/api/send-email', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'devis', clientEmail: client.email, devisId: data.id }) })
+      if (error) { setSaveError(error.message); return }
+      if (data) {
+        if (statut === 'envoye' && form.client_id) {
+          const client = clients.find(c => c.id === form.client_id)
+          if (client?.email) {
+            await fetch('/api/send-email', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ type: 'devis', clientEmail: client.email, devisId: data.id }) })
+          }
         }
+        setShowCreate(false)
+        setForm({ client_id: '', titre: '', notes: '', date_validite: '', lignes: [{ ...EMPTY_LIGNE }] })
+        await loadData()
       }
-      setShowCreate(false)
-      setForm({ client_id: '', titre: '', notes: '', date_validite: '', lignes: [{ ...EMPTY_LIGNE }] })
-      await loadData()
+    } catch (e: any) {
+      setSaveError(e.message || 'Une erreur est survenue')
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
   }
 
   const handleStatusChange = async (id: string, statut: string) => {
@@ -361,11 +385,19 @@ export default function DevisPage() {
                 <textarea className="form-input" rows={3} placeholder="Conditions particulières, modalités de paiement…" value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} style={{ resize: 'vertical' }} />
               </div>
 
+              {saveError && (
+                <div style={{ marginBottom: 12, padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 'var(--r-md)', color: '#DC2626', fontSize: 13 }}>
+                  ⚠️ {saveError}
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-                <button className="btn btn-ghost" onClick={() => setShowCreate(false)}>Annuler</button>
-                <button className="btn btn-secondary" onClick={() => handleSave('brouillon')} disabled={saving}>Brouillon</button>
+                <button className="btn btn-ghost" onClick={() => { setShowCreate(false); setSaveError(null) }}>Annuler</button>
+                <button className="btn btn-secondary" onClick={() => handleSave('brouillon')} disabled={saving}>
+                  {saving ? <span className="spinner" style={{ marginRight: 6 }} /> : null}
+                  Brouillon
+                </button>
                 <button className="btn btn-primary" onClick={() => handleSave('envoye')} disabled={saving}>
-                  {saving ? <span className="waitlist-spinner" /> : null}
+                  {saving ? <span className="spinner" style={{ marginRight: 6 }} /> : null}
                   Envoyer au client
                 </button>
               </div>
@@ -398,5 +430,13 @@ export default function DevisPage() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function DevisPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 48, textAlign: 'center', color: 'var(--c-text-muted)' }}>Chargement…</div>}>
+      <DevisContent />
+    </Suspense>
   )
 }

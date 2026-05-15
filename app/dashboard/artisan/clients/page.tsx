@@ -10,6 +10,7 @@ export default function ClientsPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [editClient, setEditClient] = useState<ClientArtisan | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
 
   const emptyForm = { prenom: '', nom: '', email: '', phone: '', adresse: '', notes: '' }
@@ -38,17 +39,25 @@ export default function ClientsPage() {
   const handleSave = async () => {
     if (!artisanId) return
     setSaving(true)
-    const supabase = createClient()
-    if (editClient) {
-      await supabase.from('clients').update(form).eq('id', editClient.id)
-    } else {
-      await supabase.from('clients').insert({ ...form, artisan_id: artisanId })
+    setSaveError(null)
+    try {
+      const supabase = createClient()
+      if (editClient) {
+        const { error } = await supabase.from('clients').update(form).eq('id', editClient.id)
+        if (error) { setSaveError(error.message); return }
+      } else {
+        const { error } = await supabase.from('clients').insert({ ...form, artisan_id: artisanId })
+        if (error) { setSaveError(error.message); return }
+      }
+      setShowCreate(false)
+      setEditClient(null)
+      setForm(emptyForm)
+      await loadData()
+    } catch (e: any) {
+      setSaveError(e.message || 'Une erreur est survenue')
+    } finally {
+      setSaving(false)
     }
-    setShowCreate(false)
-    setEditClient(null)
-    setForm(emptyForm)
-    await loadData()
-    setSaving(false)
   }
 
   const handleDelete = async (id: string) => {
@@ -179,10 +188,15 @@ export default function ClientsPage() {
                 <label className="form-label">Notes</label>
                 <textarea className="form-input" rows={3} value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} placeholder="Préférences, historique, remarques…" style={{ resize: 'vertical' }} />
               </div>
+              {saveError && (
+                <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 'var(--r-md)', color: '#DC2626', fontSize: 13 }}>
+                  ⚠️ {saveError}
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', paddingTop: 8 }}>
-                <button className="btn btn-ghost" onClick={() => { setShowCreate(false); setEditClient(null) }}>Annuler</button>
+                <button className="btn btn-ghost" onClick={() => { setShowCreate(false); setEditClient(null); setSaveError(null) }}>Annuler</button>
                 <button className="btn btn-primary" onClick={handleSave} disabled={saving || !form.nom}>
-                  {saving ? <span className="waitlist-spinner"></span> : null}
+                  {saving ? <span className="spinner" style={{ marginRight: 6 }} /> : null}
                   {editClient ? 'Enregistrer' : 'Ajouter le client'}
                 </button>
               </div>

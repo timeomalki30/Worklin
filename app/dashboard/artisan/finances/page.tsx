@@ -84,7 +84,7 @@ export default function FinancesPage() {
     return { label: `T${q + 1} ${new Date().getFullYear()}`, tva }
   })
 
-  if (loading) return <div className="flex items-center justify-center h-64"><div className="spinner w-8 h-8 border-navy-800" /></div>
+  if (loading) return <div style={{ padding: 64, textAlign: 'center', color: 'var(--c-text-muted)' }}>Chargement…</div>
 
   return (
     <div className="space-y-8">
@@ -190,7 +190,7 @@ export default function FinancesPage() {
                     </div>
                     {client?.email && (
                       <button onClick={() => handleRelance(f.id, client.email, f)} disabled={sendingRelance === f.id} className="btn btn-sm btn-ghost flex-shrink-0">
-                        {sendingRelance === f.id ? <span className="spinner" /> : <Send size={13} />}
+                        {sendingRelance === f.id ? <span className="spinner" style={{ width: 13, height: 13, borderWidth: 2 }} /> : <Send size={13} />}
                         Relancer
                       </button>
                     )}

@@ -12,6 +12,7 @@ export default function VitrinePage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [demandes, setDemandes] = useState<Demande[]>([])
   const [form, setForm] = useState({
@@ -51,21 +52,28 @@ export default function VitrinePage() {
   const handleSave = async () => {
     if (!artisan) return
     setSaving(true)
-    const supabase = createClient()
-    await supabase.from('artisans').update({
-      slug: form.slug,
-      metier: form.metier,
-      description: form.description,
-      ville: form.ville,
-      entreprise: form.entreprise,
-      adresse: form.adresse,
-      tarif_horaire: form.tarif_horaire ? parseFloat(form.tarif_horaire) : null,
-      certifications: form.certifications,
-      photo_url: form.photo_url,
-    }).eq('id', artisan.id)
-    setSaving(false)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 3000)
+    setSaveError(null)
+    try {
+      const supabase = createClient()
+      const { error } = await supabase.from('artisans').update({
+        slug: form.slug,
+        metier: form.metier,
+        description: form.description,
+        ville: form.ville,
+        entreprise: form.entreprise,
+        adresse: form.adresse,
+        tarif_horaire: form.tarif_horaire ? parseFloat(form.tarif_horaire) : null,
+        certifications: form.certifications,
+        photo_url: form.photo_url,
+      }).eq('id', artisan.id)
+      if (error) { setSaveError(error.message); return }
+      setSaved(true)
+      setTimeout(() => setSaved(false), 3000)
+    } catch (e: any) {
+      setSaveError(e.message || 'Une erreur est survenue')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleDemandeStatus = async (id: string, statut: string) => {
@@ -80,7 +88,7 @@ export default function VitrinePage() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  if (loading) return <div className="flex items-center justify-center h-64"><div className="spinner w-8 h-8 border-navy-800" /></div>
+  if (loading) return <div style={{ padding: 64, textAlign: 'center', color: 'var(--c-text-muted)' }}>Chargement…</div>
 
   const vitrineUrl = `${APP_URL}/${form.slug}`
 
@@ -101,6 +109,12 @@ export default function VitrinePage() {
           </button>
         </div>
       </div>
+
+      {saveError && (
+        <div style={{ padding: '12px 16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 'var(--r-md)', color: '#DC2626', fontSize: 13 }}>
+          ⚠️ {saveError}
+        </div>
+      )}
 
       {/* URL Box */}
       <div className="card p-5 flex items-center gap-4">

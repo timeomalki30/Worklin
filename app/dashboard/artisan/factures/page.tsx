@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import dynamic from 'next/dynamic'
 import type { Facture, Devis, ClientArtisan } from '@/types'
+import { Trash2 } from 'lucide-react'
 
 const PDFDownloadLink = dynamic(() => import('@react-pdf/renderer').then(m => ({ default: m.PDFDownloadLink })), { ssr: false })
 const PDFViewer = dynamic(() => import('@react-pdf/renderer').then(m => ({ default: m.PDFViewer })), { ssr: false })
@@ -154,6 +155,13 @@ export default function FacturesPage() {
     setFactures(prev => prev.map(f => f.id === id ? { ...f, statut: statut as any } : f))
   }
 
+  const handleDelete = async (id: string) => {
+    if (!confirm('Supprimer cette facture ? Cette action est irréversible.')) return
+    const supabase = createClient()
+    const { error } = await supabase.from('factures').delete().eq('id', id)
+    if (!error) setFactures(prev => prev.filter(f => f.id !== id))
+  }
+
   const updateLigne = (i: number, field: string, value: any) => {
     setForm(prev => {
       const lignes = [...prev.lignes]
@@ -235,9 +243,14 @@ export default function FacturesPage() {
                       </select>
                     </td>
                     <td style={{ padding: '14px 16px' }}>
-                      <button onClick={() => setPreviewFacture(f)} style={{ fontSize: 12, padding: '6px 12px', borderRadius: 'var(--r-sm)', border: '1px solid var(--c-border)', background: 'var(--c-surface)', cursor: 'pointer', fontFamily: 'var(--font-head)', fontWeight: 600 }}>
-                        Aperçu PDF
-                      </button>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <button onClick={() => setPreviewFacture(f)} style={{ fontSize: 12, padding: '6px 12px', borderRadius: 'var(--r-sm)', border: '1px solid var(--c-border)', background: 'var(--c-surface)', cursor: 'pointer', fontFamily: 'var(--font-head)', fontWeight: 600 }}>
+                          Aperçu PDF
+                        </button>
+                        <button onClick={() => handleDelete(f.id)} title="Supprimer" style={{ width: 32, height: 32, border: '1px solid #fecaca', borderRadius: 'var(--r-sm)', background: '#fef2f2', cursor: 'pointer', display: 'grid', placeItems: 'center', color: '#DC2626' }}>
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )
